@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environnement virtuel
+.venv/
+venv/
+
+# Secrets
+.env
+.env.*
+
+# Données générées (offres, base, sauvegardes)
+output/
+data/
+*.db
+*.db-shm
+*.db-wal
+*.tmp
+
+# Données personnelles
+profil/
+lettres/
+
+# Excel ouvert
+~$*
+
+# Claude Code
+.claude
+
+# Système / éditeurs
+.DS_Store
+.idea/
+.vscode/
