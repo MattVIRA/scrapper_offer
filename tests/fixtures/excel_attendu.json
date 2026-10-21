@@ -1,0 +1,306 @@
+{
+ "jour_1": {
+  "titre_feuille": "Offres",
+  "volets_figes": "A2",
+  "filtre": "A1:P5",
+  "listes": [
+   {
+    "formule": "\"À voir,Intéressant,Postulé,Refusé,Pas pour moi\"",
+    "plage": "N2:N20000"
+   }
+  ],
+  "cellules": [
+   [
+    "Réf.",
+    "Titre",
+    "Entreprise",
+    "Pays",
+    "Ville",
+    "Durée",
+    "Publiée le",
+    "Ajoutée le",
+    "En ligne",
+    "Score",
+    "Mots trouvés",
+    "Lien",
+    "Recherche",
+    "Statut",
+    "Postulé le",
+    "Notes"
+   ],
+   [
+    "VIE247348",
+    "Junior Scientific Food Affairs Advisor (H/F)",
+    "FERRERO FRANCE COMMERCIALE",
+    "BELGIQUE",
+    "BRUXELLES",
+    12,
+    "2026-10-21T00:00:00",
+    "2026-10-20T00:00:00",
+    "Oui",
+    1,
+    "food",
+    "Ouvrir l'offre",
+    "Recherche principale",
+    null,
+    null,
+    null
+   ],
+   [
+    "VIE247346",
+    "OCS Field Engineer/Coordinator (H/F)",
+    "COLAS RAIL",
+    "CANADA",
+    "EDMONTON (AL)",
+    12,
+    "2026-10-21T00:00:00",
+    "2026-10-20T00:00:00",
+    "Oui",
+    0,
+    null,
+    "Ouvrir l'offre",
+    "Recherche principale",
+    null,
+    null,
+    null
+   ],
+   [
+    "VIE247344",
+    "Finance Controller (H/F)",
+    "OPMOBILITY EXTERIOR SERVICES",
+    "MEXIQUE",
+    "SILAO-GUANAJUATO",
+    24,
+    "2026-10-21T00:00:00",
+    "2026-10-20T00:00:00",
+    "Oui",
+    0,
+    null,
+    "Ouvrir l'offre",
+    "Recherche principale",
+    null,
+    null,
+    null
+   ],
+   [
+    "VIE247338",
+    "VIE Geothermal Research Scientist (H/F)",
+    "SERVICES TECHNIQUES SCHLUMBERGER",
+    "ROYAUME-UNI",
+    "CAMBRIDGE",
+    24,
+    "2026-10-21T00:00:00",
+    "2026-10-20T00:00:00",
+    "Oui",
+    2,
+    "python, data",
+    "Ouvrir l'offre",
+    "Recherche principale",
+    null,
+    null,
+    null
+   ]
+  ],
+  "liens": [
+   [
+    "L2",
+    "https://mon-vie-via.businessfrance.fr/offres/247348"
+   ],
+   [
+    "L3",
+    "https://mon-vie-via.businessfrance.fr/offres/247346"
+   ],
+   [
+    "L4",
+    "https://mon-vie-via.businessfrance.fr/offres/247344"
+   ],
+   [
+    "L5",
+    "https://mon-vie-via.businessfrance.fr/offres/247338"
+   ]
+  ],
+  "fonds": []
+ },
+ "jour_2": {
+  "titre_feuille": "Offres",
+  "volets_figes": null,
+  "filtre": "A1:Q6",
+  "listes": [],
+  "cellules": [
+   [
+    "Notes",
+    "Réf.",
+    "Titre",
+    "Entreprise",
+    "Pays",
+    "Ville",
+    "Durée",
+    "Publiée le",
+    "Ajoutée le",
+    "En ligne",
+    "Score",
+    "Mots trouvés",
+    "Lien",
+    "Recherche",
+    "Statut",
+    "Postulé le",
+    "Ma colonne"
+   ],
+   [
+    "Relancer lundi",
+    "VIE247348",
+    "Junior Scientific Food Affairs Advisor (H/F)",
+    "FERRERO FRANCE COMMERCIALE",
+    "BELGIQUE",
+    "BRUXELLES",
+    12,
+    "2026-10-21T00:00:00",
+    "2026-10-20T00:00:00",
+    "Plus en ligne",
+    1,
+    "food",
+    "Ouvrir l'offre",
+    "Recherche principale",
+    "Postulé",
+    "2026-10-20T00:00:00",
+    "perso 1"
+   ],
+   [
+    "Bof",
+    "VIE247346",
+    "OCS Field Engineer/Coordinator (H/F)",
+    "COLAS RAIL",
+    "CANADA",
+    "EDMONTON (AL)",
+    12,
+    "2026-10-21T00:00:00",
+    "2026-10-20T00:00:00",
+    "Oui",
+    0,
+    null,
+    "Ouvrir l'offre",
+    "Recherche principale",
+    "Intéressant",
+    "2026-10-20T00:00:00",
+    "perso 2"
+   ],
+   [
+    null,
+    "VIE247344",
+    "Finance Controller (H/F)",
+    "OPMOBILITY EXTERIOR SERVICES",
+    "MEXIQUE",
+    "SILAO-GUANAJUATO",
+    24,
+    "2026-10-21T00:00:00",
+    "2026-10-20T00:00:00",
+    "Oui",
+    0,
+    null,
+    "Ouvrir l'offre",
+    "Recherche principale",
+    null,
+    null,
+    "perso 3"
+   ],
+   [
+    null,
+    "VIE247338",
+    "VIE Geothermal Research Scientist (H/F)",
+    "SERVICES TECHNIQUES SCHLUMBERGER",
+    "ROYAUME-UNI",
+    "CAMBRIDGE",
+    24,
+    "2026-10-21T00:00:00",
+    "2026-10-20T00:00:00",
+    "Oui",
+    2,
+    "python, data",
+    "Ouvrir l'offre",
+    "Recherche principale",
+    null,
+    null,
+    "perso 4"
+   ],
+   [
+    null,
+    "VIE247336",
+    "Chargé(e) de mission en Stratégie et Développement Commercial (H/F)",
+    "EFE INTERNATIONAL",
+    "MADAGASCAR",
+    "ANTANANARIVO",
+    12,
+    "2026-10-21T00:00:00",
+    "2026-10-21T00:00:00",
+    "Oui",
+    0,
+    null,
+    "Ouvrir l'offre",
+    "Recherche principale",
+    null,
+    null,
+    null
+   ]
+  ],
+  "liens": [
+   [
+    "M6",
+    "https://mon-vie-via.businessfrance.fr/offres/247336"
+   ]
+  ],
+  "fonds": [
+   [
+    "B6",
+    "FFE2F0D9"
+   ],
+   [
+    "C6",
+    "FFE2F0D9"
+   ],
+   [
+    "D6",
+    "FFE2F0D9"
+   ],
+   [
+    "E6",
+    "FFE2F0D9"
+   ],
+   [
+    "F6",
+    "FFE2F0D9"
+   ],
+   [
+    "G6",
+    "FFE2F0D9"
+   ],
+   [
+    "H6",
+    "FFE2F0D9"
+   ],
+   [
+    "I6",
+    "FFE2F0D9"
+   ],
+   [
+    "J6",
+    "FFE2F0D9"
+   ],
+   [
+    "K6",
+    "FFE2F0D9"
+   ],
+   [
+    "L6",
+    "FFE2F0D9"
+   ],
+   [
+    "M6",
+    "FFE2F0D9"
+   ],
+   [
+    "N6",
+    "FFE2F0D9"
+   ]
+  ]
+ }
+}
