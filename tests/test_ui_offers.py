@@ -15,7 +15,7 @@ from offers import browsing
 from offers.__main__ import UI_APP
 from offers.sources.base import FoundOffer
 from offers.storage.database import connect, list_offers, save_source_result
-from offers.ui import offer_table
+from offers.ui import labels, offer_table
 from offers.ui.offer_table import PageSettings, apply_table_changes, make_filter, table_frame
 from tests.factories import make_offer, make_stored
 
@@ -299,8 +299,8 @@ def test_make_filter_with_choices():
     result = make_filter(
         PageSettings(key="favorites", favorites_only=True),
         text="data",
-        statuses=[offer_table.NONE_CODE, "applied"],
-        letters=[offer_table.NONE_CODE],
+        statuses=[labels.NONE_CODE, "applied"],
+        letters=[labels.NONE_CODE],
         sources=["business_france"],
         countries=["ESPAGNE"],
         min_score=2,

@@ -6,7 +6,6 @@ the table only shows them, so the page always knows what is checked.
 """
 
 from collections.abc import Callable
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -17,7 +16,6 @@ from offers import browsing
 from offers.browsing import OfferFilter
 from offers.sources import source_label
 from offers.storage.database import (
-    connect,
     hide,
     list_offers,
     mark_read,
@@ -27,12 +25,18 @@ from offers.storage.database import (
     set_letter_status,
     set_status,
 )
-from offers.tracking import LETTER_STATUSES, STATUSES, letter_label, status_label
+from offers.tracking import STATUSES, letter_label, status_label
+from offers.ui import offer_card
+from offers.ui.labels import (
+    LETTER_CHOICES,
+    STATUS_CHOICES,
+    letter_choice_label,
+    status_choice_label,
+    to_database_code,
+    to_widget_code,
+)
+from offers.ui.session import open_database
 
-# Stands for "no status" / "no letter" in the filters and menus.
-NONE_CODE = ""
-NONE_STATUS_LABEL = "Sans statut"
-NONE_LETTER_LABEL = "Aucune"
 ONLINE_LABELS = {
     browsing.ONLINE: "En ligne",
     browsing.OFFLINE: "Hors ligne",
@@ -72,21 +76,14 @@ class PageSettings:
         return f"{self.key}_{name}"
 
 
-@contextmanager
-def open_database(path):
-    """Open the database for one run of the page, and close it."""
-    conn = connect(path)
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-
 def show_offer_page(settings):
     """Show the whole list page: filters, counters, actions and table."""
     st.session_state.setdefault(settings.state_key("selected"), set())
     with open_database(st.session_state.db_path) as conn:
         offers = list_offers(conn)
+        if mark_card_read(conn, settings, offers):
+            # Read again, for the counters and the table.
+            offers = list_offers(conn)
         tags = browsing.duplicate_tags(probable_duplicates(conn))
     offer_filter = filter_sidebar(offers, settings)
     shown = browsing.filter_offers(offers, offer_filter)
@@ -94,6 +91,41 @@ def show_offer_page(settings):
     show_undo(settings)
     show_actions(settings, shown)
     show_table(settings, shown, tags)
+    show_open_card(settings, offers, tags)
+
+
+def opened_offer(settings, offers):
+    """Return the StoredOffer whose card is open, or None."""
+    card_id = st.session_state.get(offer_card.card_key(settings))
+    return next((stored for stored in offers if stored.id == card_id), None)
+
+
+def mark_card_read(conn, settings, offers):
+    """Mark as read the offer whose card is open; tell whether it changed.
+
+    A card whose offer is no longer in the database is closed.
+    """
+    stored = opened_offer(settings, offers)
+    if stored is None:
+        offer_card.close_card(settings)
+        return False
+    if not browsing.is_unread(stored):
+        return False
+    mark_read(conn, [stored.id], datetime.now())
+    return True
+
+
+def show_open_card(settings, offers, tags):
+    """Show the card of the opened offer, if any."""
+    stored = opened_offer(settings, offers)
+    if stored is None:
+        return
+    offer_card.show_card(
+        settings,
+        stored,
+        tags.get(stored.id, []),
+        on_trash=lambda offer_ids: act(settings, hide, offer_ids, trashed=True),
+    )
 
 
 # --- Filters ------------------------------------------------------------------
@@ -111,15 +143,15 @@ def filter_sidebar(offers, settings):
         text = st.text_input("Titre ou entreprise", key=key("text"))
         statuses = st.multiselect(
             "Statut",
-            [NONE_CODE, *STATUSES],
-            default=sorted(to_widget_codes(browsing.DEFAULT_STATUSES), key=status_order),
+            STATUS_CHOICES,
+            default=sorted(map(to_widget_code, browsing.DEFAULT_STATUSES), key=status_order),
             format_func=status_choice_label,
             placeholder="Tous",
             key=key("statuses"),
         )
         letters = st.multiselect(
             "Lettre",
-            [NONE_CODE, *LETTER_STATUSES],
+            LETTER_CHOICES,
             format_func=letter_choice_label,
             placeholder="Toutes",
             key=key("letters"),
@@ -177,8 +209,8 @@ def make_filter(
     return OfferFilter(
         sources=frozenset(sources) or None,
         countries=frozenset(countries) or None,
-        statuses=frozenset(to_database_codes(statuses)) or frozenset({None, *STATUSES}),
-        letter_statuses=frozenset(to_database_codes(letters)) or None,
+        statuses=frozenset(map(to_database_code, statuses)) or frozenset({None, *STATUSES}),
+        letter_statuses=frozenset(map(to_database_code, letters)) or None,
         min_score=min_score or None,
         online=online or browsing.ALL,
         added_since=added_since,
@@ -188,25 +220,9 @@ def make_filter(
     )
 
 
-def to_widget_codes(codes):
-    return [NONE_CODE if code is None else code for code in codes]
-
-
-def to_database_codes(codes):
-    return [None if code == NONE_CODE else code for code in codes]
-
-
 def status_order(code):
     """Sort the status choices as in STATUSES, "no status" first."""
-    return [NONE_CODE, *STATUSES].index(code)
-
-
-def status_choice_label(code):
-    return NONE_STATUS_LABEL if code == NONE_CODE else status_label(code)
-
-
-def letter_choice_label(code):
-    return NONE_LETTER_LABEL if code == NONE_CODE else letter_label(code)
+    return STATUS_CHOICES.index(code)
 
 
 # --- Counters -----------------------------------------------------------------
@@ -250,7 +266,7 @@ def show_actions(settings, shown):
         )
         st.menu_button(
             "Lettre",
-            [NONE_CODE, *LETTER_STATUSES],
+            LETTER_CHOICES,
             format_func=letter_choice_label,
             icon=":material/edit_note:",
             disabled=nothing_checked,
@@ -291,7 +307,7 @@ def write_status(conn, offer_ids, code, now):
 
 
 def write_letter_status(conn, offer_ids, code, now):
-    set_letter_status(conn, offer_ids, None if code == NONE_CODE else code, now)
+    set_letter_status(conn, offer_ids, to_database_code(code), now)
 
 
 def add_favorite(conn, offer_ids, now):
@@ -449,8 +465,6 @@ def apply_table_changes(conn, row_ids, edited_rows, selected, now):
 
 
 def open_offer(settings):
-    """Callback of the "Ouvrir" button: the offer is read (its card comes in T3.6)."""
+    """Callback of the "Ouvrir" button: open the card of the offer of that row."""
     row = st.session_state[settings.state_key("open")]["row"]
-    offer_id = st.session_state[settings.state_key("rows")][row]
-    with open_database(st.session_state.db_path) as conn:
-        mark_read(conn, [offer_id], datetime.now())
+    offer_card.open_card(settings, st.session_state[settings.state_key("rows")][row])

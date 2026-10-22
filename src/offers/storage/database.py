@@ -298,6 +298,24 @@ def save_tracking_details(conn, offer_id, applied_on, notes, now):
     )
 
 
+def save_follow_up(conn, offer_id, status, letter_status, favorite, applied_on, notes, now):
+    """Write the whole follow-up of an offer at once, as entered in its card.
+
+    applied_on: date, text (kept from the old Excel file) or None. Empty
+    notes are stored as None.
+    """
+    check_code(status, STATUSES)
+    check_code(letter_status, LETTER_STATUSES)
+    fields = {
+        "status": status,
+        "letter_status": letter_status,
+        "favorite": int(favorite),
+        "applied_on": to_text(applied_on),
+        "notes": notes or None,
+    }
+    update_tracking(conn, [offer_id], fields, now)
+
+
 def check_code(code, codes):
     """Refuse a code that is neither None nor one of codes."""
     if code is not None and code not in codes:
