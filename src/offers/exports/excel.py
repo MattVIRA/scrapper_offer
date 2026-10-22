@@ -1,4 +1,4 @@
-"""Excel file of the offers.
+"""Excel file of the offers, exported from the database.
 
 Rules:
 - the file is never overwritten;
@@ -6,7 +6,8 @@ Rules:
 - rows already present are neither moved nor rewritten, except the
   "En ligne", "Score" and "Mots trouvés" columns, and "Source" when it
   is empty;
-- the user's columns are never modified.
+- the user's columns are never modified, not even on a new row;
+- a row whose reference is not in the database is not modified.
 
 Columns are found by their title, not by their position: the user can
 sort the file, move or add columns.
@@ -26,6 +27,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 from offers.errors import OffersError
 from offers.sources import source_label
+from offers.tracking import STATUSES
 
 # Columns filled by the program.
 # fmt: off
@@ -37,7 +39,10 @@ SCRIPT_COLUMNS = [
 # Columns reserved for the user. The program only writes their title.
 USER_COLUMNS = ["Statut", "Postulé le", "Notes"]
 
-STATUS_CHOICES = ["À voir", "Intéressant", "Postulé", "Refusé", "Pas pour moi"]
+STATUS_CHOICES = list(STATUSES.values())
+STATUS_FORMULA = '"' + ",".join(STATUS_CHOICES) + '"'
+# Drop-down list set by the program in lot 1, replaced by the current one.
+OLD_STATUS_FORMULAS = ['"À voir,Intéressant,Postulé,Refusé,Pas pour moi"']
 ONLINE = "Oui"
 NO_LONGER_ONLINE = "Plus en ligne"
 LINK_TEXT = "Ouvrir l'offre"
@@ -71,7 +76,7 @@ class ExcelReport:
     """What an update changed in the file."""
 
     added: int
-    relevant: int
+    # Rows marked as no longer online in this file.
     removed: int
 
 
@@ -105,6 +110,11 @@ def open_workbook(path):
         sheet.title = SHEET_TITLE
         sheet.freeze_panes = "A2"
         return workbook
+    return read_workbook(path)
+
+
+def read_workbook(path):
+    """Return the workbook of an existing file."""
     try:
         return load_workbook(path)
     except (OSError, zipfile.BadZipFile, InvalidFileException) as err:
@@ -136,6 +146,15 @@ def read_columns(sheet):
     return columns
 
 
+def check_reference_column(columns):
+    """Stop if the "Réf." column, needed to recognize the offers, is missing."""
+    if "Réf." not in columns:
+        raise ExcelError(
+            'La colonne "Réf." est introuvable dans le fichier Excel. '
+            "Le script en a besoin pour reconnaître les offres."
+        )
+
+
 def add_missing_columns(sheet, columns):
     """Add the missing columns on the right (all of them, if the file is new)."""
     for title in SCRIPT_COLUMNS + USER_COLUMNS:
@@ -156,9 +175,9 @@ def last_row(sheet):
     return row
 
 
-def write_new_row(sheet, columns, row, found, score, words, today, highlight):
-    """Write a new offer on the given row."""
-    offer = found.offer
+def write_new_row(sheet, columns, row, stored, highlight):
+    """Write a new offer (a StoredOffer) on the given row."""
+    offer = stored.offer
     values = {
         "Réf.": offer.reference,
         "Titre": offer.title,
@@ -167,12 +186,12 @@ def write_new_row(sheet, columns, row, found, score, words, today, highlight):
         "Ville": offer.city,
         "Durée": offer.duration_months,
         "Publiée le": offer.published_on,
-        "Ajoutée le": today,
-        "En ligne": ONLINE,
-        "Score": score,
-        "Mots trouvés": words,
+        "Ajoutée le": stored.first_seen.date(),
+        "En ligne": ONLINE if stored.online else NO_LONGER_ONLINE,
+        "Score": stored.score,
+        "Mots trouvés": stored.words,
         "Lien": LINK_TEXT,
-        "Recherche": found.search_name,
+        "Recherche": stored.search_name,
         "Source": source_label(offer.source),
     }
     for title, value in values.items():
@@ -203,12 +222,11 @@ def remove_old_highlight(sheet, columns, end, today):
                 cell.fill = PatternFill()
 
 
-def update_existing_rows(sheet, columns, end, online_offers, can_remove, score):
+def update_existing_rows(sheet, columns, end, stored_offers):
     """Update "En ligne", "Score", "Mots trouvés" and an empty "Source".
 
-    online_offers: offers known to be online, by reference.
-    can_remove: True if online_offers is complete, so a row missing from it
-        is no longer online.
+    stored_offers: StoredOffer by reference. Rows of offers no longer
+        online keep their last score.
     Return the references present and the number of rows marked as no
     longer online.
     """
@@ -219,17 +237,20 @@ def update_existing_rows(sheet, columns, end, online_offers, can_remove, score):
         if not ref:
             continue
         present.add(ref)
+        stored = stored_offers.get(ref)
+        if stored is None:
+            continue
         online_cell = sheet.cell(row=row, column=columns["En ligne"])
-        if ref in online_offers:
-            offer = online_offers[ref]
-            offer_score, words = score(offer)
+        if stored.online:
             online_cell.value = ONLINE
-            sheet.cell(row=row, column=columns["Score"]).value = offer_score
-            sheet.cell(row=row, column=columns["Mots trouvés"]).value = words
+            # No score yet for an offer imported from this file.
+            if stored.score is not None:
+                sheet.cell(row=row, column=columns["Score"]).value = stored.score
+                sheet.cell(row=row, column=columns["Mots trouvés"]).value = stored.words
             source_cell = sheet.cell(row=row, column=columns["Source"])
             if source_cell.value is None:
-                source_cell.value = source_label(offer.source)
-        elif can_remove and online_cell.value != NO_LONGER_ONLINE:
+                source_cell.value = source_label(stored.offer.source)
+        elif online_cell.value != NO_LONGER_ONLINE:
             online_cell.value = NO_LONGER_ONLINE
             removed += 1
     return present, removed
@@ -238,22 +259,27 @@ def update_existing_rows(sheet, columns, end, online_offers, can_remove, score):
 def add_status_list(sheet, columns):
     """Add the drop-down list of the "Statut" column."""
     letter = get_column_letter(columns["Statut"])
-    choices = DataValidation(
-        type="list", formula1='"' + ",".join(STATUS_CHOICES) + '"', allow_blank=True
-    )
+    choices = DataValidation(type="list", formula1=STATUS_FORMULA, allow_blank=True)
     choices.add(f"{letter}2:{letter}{STATUS_LAST_ROW}")
     sheet.add_data_validation(choices)
 
 
-def update_workbook(path, found_offers, online_offers, score, today):
+def update_status_list(sheet):
+    """Replace the program's old drop-down list by the current statuses.
+
+    A list added by hand is recognized by its formula, and kept.
+    """
+    for validation in sheet.data_validations.dataValidation:
+        if validation.formula1 in OLD_STATUS_FORMULAS:
+            validation.formula1 = STATUS_FORMULA
+
+
+def update_workbook(path, stored_offers, today):
     """Create the Excel file, or add the new offers to the existing file.
 
-    found_offers: FoundOffer list; only these offers can be added.
-    online_offers: all offers online, by reference, to update the rows
-        already present. None if unknown: then no row is marked as no
-        longer online, and only rows found again are updated.
-    score: function that returns (score, found words) for an Offer.
-    today: date written in "Ajoutée le".
+    stored_offers: StoredOffer list (database.list_offers), sorted by
+        first_seen then id: the order in which new offers are added.
+    today: offers first seen on that day get a green background.
     """
     check_file_closed(path)
     file_exists = os.path.exists(path)
@@ -261,43 +287,37 @@ def update_workbook(path, found_offers, online_offers, score, today):
     sheet = workbook.active
 
     columns = read_columns(sheet)
-    if file_exists and "Réf." not in columns:
-        raise ExcelError(
-            'La colonne "Réf." est introuvable dans le fichier Excel. '
-            "Le script en a besoin pour reconnaître les offres."
-        )
+    if file_exists:
+        check_reference_column(columns)
     add_missing_columns(sheet, columns)
     end = last_row(sheet)
 
-    can_remove = online_offers is not None
-    if not can_remove:
-        online_offers = {found.offer.reference: found.offer for found in found_offers}
-    present, removed = update_existing_rows(sheet, columns, end, online_offers, can_remove, score)
+    by_reference = {stored.offer.reference: stored for stored in stored_offers}
+    present, removed = update_existing_rows(sheet, columns, end, by_reference)
     remove_old_highlight(sheet, columns, end, today)
 
     # New offers, at the bottom. On the first run there is no green
     # background: everything would be green.
     added = 0
-    relevant = 0
-    for found in found_offers:
-        ref = found.offer.reference
+    for stored in stored_offers:
+        ref = stored.offer.reference
         if ref in present:
             continue
         present.add(ref)
-        offer_score, words = score(found.offer)
         end += 1
-        write_new_row(sheet, columns, end, found, offer_score, words, today, highlight=file_exists)
+        highlight = file_exists and stored.first_seen.date() == today
+        write_new_row(sheet, columns, end, stored, highlight)
         added += 1
-        if offer_score > 0:
-            relevant += 1
 
     # The auto filter must also cover the new rows.
     sheet.auto_filter.ref = f"A1:{get_column_letter(sheet.max_column)}{end}"
-    if not file_exists:
+    if file_exists:
+        update_status_list(sheet)
+    else:
         add_status_list(sheet, columns)
 
     # Backup last: nothing is written while an error is still possible.
     if file_exists:
         save_backup(path)
     save_workbook(workbook, path)
-    return ExcelReport(added=added, relevant=relevant, removed=removed)
+    return ExcelReport(added=added, removed=removed)

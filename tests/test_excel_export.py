@@ -1,4 +1,5 @@
-"""Tests of the Excel export (offers.exports.excel).
+"""Tests of the Excel export (offers.exports.excel), from a database filled
+by save_source_result.
 
 To regenerate the snapshot after a wanted change:
     UPDATE_SNAPSHOT=1 pytest tests/test_excel_export.py
@@ -7,16 +8,18 @@ To regenerate the snapshot after a wanted change:
 import json
 import os
 import re
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 import pytest
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import column_index_from_string, get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 from offers.exports import excel
 from offers.scoring.keywords import KeywordScorer
 from offers.sources.base import FoundOffer
 from offers.sources.business_france import to_offer
+from offers.storage.database import connect, list_offers, save_source_result
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 SNAPSHOT_PATH = os.path.join(FIXTURES, "excel_expected.json")
@@ -37,11 +40,17 @@ def scorer(include, exclude=()):
     return KeywordScorer(include, exclude).score
 
 
-def run(path, day, offers, words=WORDS_DAY_1, online=True):
-    """Update the file as the pipeline does, with these offers online."""
-    online_offers = {o.reference: o for o in offers} if online else None
+def save(conn, day, found, online, words=WORDS_DAY_1):
+    """Save in the database what a source returned on that day."""
+    moment = datetime.combine(day, time(8))
+    save_source_result(conn, "business_france", found, online, scorer(words), moment)
+
+
+def run(conn, path, day, offers, words=WORDS_DAY_1, online=True):
+    """Save these offers, online, then export, as the pipeline does."""
     found = [FoundOffer(o, SEARCH) for o in offers]
-    return excel.update_workbook(path, found, online_offers, scorer(words), day)
+    save(conn, day, found, offers if online else None, words)
+    return excel.update_workbook(path, list_offers(conn), day)
 
 
 def rows_by_reference(path):
@@ -167,13 +176,13 @@ def reorder_and_annotate(path):
     return entered
 
 
-def two_days(path, offers):
+def two_days(conn, path, offers):
     """Day 1 on a new file, day 2 on a file edited by hand."""
     result = {}
-    run(path, DAY_1, offers[:4])
+    run(conn, path, DAY_1, offers[:4])
     result["jour_1"] = content(path)
     reorder_and_annotate(path)
-    run(path, DAY_2, offers[1:], words=WORDS_DAY_2)
+    run(conn, path, DAY_2, offers[1:], words=WORDS_DAY_2)
     result["jour_2"] = content(path)
     return result
 
@@ -189,11 +198,16 @@ def path(tmp_path):
     return str(tmp_path / "offres_vie.xlsx")
 
 
+@pytest.fixture
+def conn(tmp_path):
+    return connect(tmp_path / "offers.db")
+
+
 # --- 1. Creation --------------------------------------------------------------
 
 
-def test_file_creation(path, offers):
-    report = run(path, DAY_1, offers)
+def test_file_creation(conn, path, offers):
+    report = run(conn, path, DAY_1, offers)
 
     sheet = load_workbook(path).active
     assert [c.value for c in sheet[1]] == excel.SCRIPT_COLUMNS + excel.USER_COLUMNS
@@ -216,27 +230,28 @@ def test_file_creation(path, offers):
 
     lists = sheet.data_validations.dataValidation
     assert len(lists) == 1
-    assert lists[0].formula1 == '"' + ",".join(excel.STATUS_CHOICES) + '"'
+    assert lists[0].formula1 == (
+        '"À voir,Intéressant,À rédiger,Lettre prête,Postulé,Réponse,Refusé,Pas pour moi"'
+    )
 
     assert sheet.cell(row=2, column=12).hyperlink.target == offers[0].url
     # No backup: there was nothing to save.
     assert not os.path.exists(os.path.join(os.path.dirname(path), "backup"))
     assert report.added == 5
     assert report.removed == 0
-    assert report.relevant == sum(1 for o in offers if scorer(WORDS_DAY_1)(o)[0] > 0)
 
 
 # --- 2. Update ----------------------------------------------------------------
 
 
-def test_update_respects_the_existing_file(path, offers):
-    run(path, DAY_1, offers[:4])
+def test_update_respects_the_existing_file(conn, path, offers):
+    run(conn, path, DAY_1, offers[:4])
     entered = reorder_and_annotate(path)
     before = rows_by_reference(path)
 
     # Day 2: the 1st offer left the site, the 5th is new, and a keyword
     # was added.
-    report = run(path, DAY_2, offers[1:], words=WORDS_DAY_2)
+    report = run(conn, path, DAY_2, offers[1:], words=WORDS_DAY_2)
     after = rows_by_reference(path)
 
     sheet = load_workbook(path).active
@@ -280,34 +295,34 @@ def test_update_respects_the_existing_file(path, offers):
     assert report.removed == 1
 
 
-def test_offer_already_offline_is_not_counted_twice(path, offers):
-    run(path, DAY_1, offers)
-    assert run(path, DAY_2, offers[1:]).removed == 1
-    assert run(path, DAY_3, offers[1:]).removed == 0
+def test_offer_already_offline_is_not_counted_twice(conn, path, offers):
+    run(conn, path, DAY_1, offers)
+    assert run(conn, path, DAY_2, offers[1:]).removed == 1
+    assert run(conn, path, DAY_3, offers[1:]).removed == 0
 
 
-def test_offer_back_online(path, offers):
-    run(path, DAY_1, offers)
-    run(path, DAY_2, offers[1:])
-    run(path, DAY_3, offers)
+def test_offer_back_online(conn, path, offers):
+    run(conn, path, DAY_1, offers)
+    run(conn, path, DAY_2, offers[1:])
+    run(conn, path, DAY_3, offers)
     assert rows_by_reference(path)[offers[0].reference]["En ligne"] == excel.ONLINE
 
 
-def test_green_background_disappears_the_next_day(path, offers):
-    run(path, DAY_1, offers[:4])
-    run(path, DAY_2, offers)
+def test_green_background_disappears_the_next_day(conn, path, offers):
+    run(conn, path, DAY_1, offers[:4])
+    run(conn, path, DAY_2, offers)
     assert green_rows(path) == [offers[4].reference]
 
-    run(path, DAY_3, offers)
+    run(conn, path, DAY_3, offers)
     assert green_rows(path) == []
 
 
-def test_no_duplicate_between_searches(path, offers):
-    online = {o.reference: o for o in offers}
+def test_no_duplicate_between_searches(conn, path, offers):
     # The same offer found by two searches is added once, with the name of
     # the first search.
     found = [FoundOffer(offers[0], "A"), FoundOffer(offers[0], "B"), FoundOffer(offers[1], "B")]
-    report = excel.update_workbook(path, found, online, scorer(WORDS_DAY_1), DAY_1)
+    save(conn, DAY_1, found, offers)
+    report = excel.update_workbook(path, list_offers(conn), DAY_1)
 
     rows = rows_by_reference(path)
     assert len(rows) == 2
@@ -315,12 +330,12 @@ def test_no_duplicate_between_searches(path, offers):
     assert report.added == 2
 
 
-def test_unknown_online_offers(path, offers):
+def test_unknown_online_offers(conn, path, offers):
     """online_offers=None: nothing is marked offline, unfound rows are kept."""
-    run(path, DAY_1, offers[:3])
+    run(conn, path, DAY_1, offers[:3])
     before = rows_by_reference(path)
 
-    report = run(path, DAY_2, offers[2:], words=WORDS_DAY_2, online=False)
+    report = run(conn, path, DAY_2, offers[2:], words=WORDS_DAY_2, online=False)
     after = rows_by_reference(path)
 
     assert report.removed == 0 and report.added == 2
@@ -330,15 +345,15 @@ def test_unknown_online_offers(path, offers):
     assert after[offers[2].reference]["Score"] == scorer(WORDS_DAY_2)(offers[2])[0]
 
 
-def test_empty_source_is_filled_on_existing_rows(path, offers):
+def test_empty_source_is_filled_on_existing_rows(conn, path, offers):
     """A file made before the "Source" column gets it on its online rows."""
-    run(path, DAY_1, offers[:2])
+    run(conn, path, DAY_1, offers[:2])
     sheet_book = load_workbook(path)
     sheet = sheet_book.active
     sheet.delete_cols(excel.read_columns(sheet)["Source"])
     sheet_book.save(path)
 
-    run(path, DAY_2, offers[1:])
+    run(conn, path, DAY_2, offers[1:])
     rows = rows_by_reference(path)
 
     sheet = load_workbook(path).active
@@ -347,28 +362,103 @@ def test_empty_source_is_filled_on_existing_rows(path, offers):
     assert all(rows[o.reference]["Source"] == "Business France" for o in offers[1:])
 
 
-# --- 3. Errors ----------------------------------------------------------------
+# --- 3. Export from the database ---------------------------------------------
 
 
-def test_error_if_the_file_is_open(path, offers):
-    run(path, DAY_1, offers[:2])
+def test_old_status_list_is_replaced_but_not_a_list_added_by_hand(conn, path, offers):
+    run(conn, path, DAY_1, offers[:2])
+    workbook = load_workbook(path)
+    sheet = workbook.active
+    sheet.data_validations.dataValidation[0].formula1 = excel.OLD_STATUS_FORMULAS[0]
+    by_hand = DataValidation(type="list", formula1='"Oui,Non"')
+    by_hand.add("T2:T100")
+    sheet.add_data_validation(by_hand)
+    workbook.save(path)
+
+    run(conn, path, DAY_2, offers)
+
+    lists = load_workbook(path).active.data_validations.dataValidation
+    assert sorted((v.formula1, str(v.sqref)) for v in lists) == [
+        ('"Oui,Non"', "T2:T100"),
+        (excel.STATUS_FORMULA, "O2:O20000"),
+    ]
+
+
+def test_row_not_in_the_database_is_not_modified(conn, path, offers):
+    run(conn, path, DAY_1, offers[:2])
+    workbook = load_workbook(path)
+    workbook.active.append(["MANUEL-1", "Offre notée à la main", None, None, None, None, None,
+                            None, "Oui", 3])  # fmt: skip
+    workbook.save(path)
+
+    run(conn, path, DAY_2, offers[1:])
+
+    row = rows_by_reference(path)["MANUEL-1"]
+    assert (row["En ligne"], row["Score"]) == ("Oui", 3)
+
+
+def test_new_rows_follow_the_database(conn, tmp_path, path, offers):
+    """In a new file: the order of first_seen, and offline offers too."""
+    run(conn, path, DAY_1, offers[:2])
+    run(conn, path, DAY_2, offers[1:])
+    # Tracking already in the database is not written: the user's columns
+    # are never written by the program.
+    conn.execute("INSERT INTO tracking (offer_id, status, updated_at) VALUES (1, 'applied', 'x')")
+
+    other = str(tmp_path / "autre.xlsx")
+    report = excel.update_workbook(other, list_offers(conn), DAY_3)
+
+    rows = rows_by_reference(other)
+    assert list(rows) == [o.reference for o in offers]
+    assert rows[offers[0].reference]["En ligne"] == excel.NO_LONGER_ONLINE
+    assert rows[offers[0].reference]["Ajoutée le"].date() == DAY_1
+    assert rows[offers[4].reference]["Ajoutée le"].date() == DAY_2
+    assert all(row["Statut"] is None for row in rows.values())
+    assert report.added == 5 and report.removed == 0
+
+
+def test_green_background_only_for_offers_first_seen_today(conn, path, offers):
+    run(conn, path, DAY_1, offers[:2])
+    # Offers saved on day 2, but exported only on day 3.
+    save(conn, DAY_2, [FoundOffer(offers[2], SEARCH)], offers[:3])
+    run(conn, path, DAY_3, offers[:4])
+    assert green_rows(path) == [offers[3].reference]
+    assert rows_by_reference(path)[offers[2].reference]["Ajoutée le"].date() == DAY_2
+
+
+def test_imported_offer_without_score_keeps_its_score(conn, path, offers):
+    run(conn, path, DAY_1, offers[:1], words=["food"])
+    conn.execute("DELETE FROM evaluations")
+
+    run_export = excel.update_workbook(path, list_offers(conn), DAY_2)
+
+    row = rows_by_reference(path)[offers[0].reference]
+    assert (row["Score"], row["Mots trouvés"]) == (1, "food")
+    assert run_export.added == 0
+
+
+# --- 4. Errors ----------------------------------------------------------------
+
+
+def test_error_if_the_file_is_open(conn, path, offers):
+    run(conn, path, DAY_1, offers[:2])
     before = content(path)
     lock = os.path.join(os.path.dirname(path), "~$offres_vie.xlsx")
     open(lock, "w").close()
 
     with pytest.raises(excel.ExcelError, match="est ouvert"):
-        run(path, DAY_2, offers)
+        run(conn, path, DAY_2, offers)
     assert content(path) == before
 
 
-def test_error_if_reference_column_is_missing(path, offers):
+def test_error_if_reference_column_is_missing(conn, path, offers):
     workbook = Workbook()
     workbook.active.append(["Titre", "Notes"])
     workbook.active.append(["Une offre", "à garder"])
     workbook.save(path)
 
     with pytest.raises(excel.ExcelError, match="Réf."):
-        run(path, DAY_1, offers)
+        run(conn, path, DAY_1, offers)
     sheet = load_workbook(path).active
     assert [[c.value for c in row] for row in sheet.iter_rows()] == [
         ["Titre", "Notes"],
@@ -377,15 +467,15 @@ def test_error_if_reference_column_is_missing(path, offers):
     assert not os.path.exists(os.path.join(os.path.dirname(path), "backup"))
 
 
-def test_error_if_the_file_is_not_an_excel_file(path, offers):
+def test_error_if_the_file_is_not_an_excel_file(conn, path, offers):
     with open(path, "w") as file:
         file.write("pas un classeur")
     with pytest.raises(excel.ExcelError, match="Impossible de lire"):
-        run(path, DAY_1, offers)
+        run(conn, path, DAY_1, offers)
 
 
-def test_error_on_save_keeps_the_old_file(monkeypatch, path, offers):
-    run(path, DAY_1, offers[:2])
+def test_error_on_save_keeps_the_old_file(conn, monkeypatch, path, offers):
+    run(conn, path, DAY_1, offers[:2])
     before = content(path)
 
     def failing_replace(source, target):
@@ -393,17 +483,17 @@ def test_error_on_save_keeps_the_old_file(monkeypatch, path, offers):
 
     monkeypatch.setattr(excel.os, "replace", failing_replace)
     with pytest.raises(excel.ExcelError, match="Impossible d'écrire.*disque protégé"):
-        run(path, DAY_2, offers)
+        run(conn, path, DAY_2, offers)
     assert content(path) == before
     assert not os.path.exists(path + ".tmp")
 
 
-# --- 4. Snapshots -------------------------------------------------------------
+# --- 5. Snapshots -------------------------------------------------------------
 
 
-def test_snapshot(path, offers):
+def test_snapshot(conn, path, offers):
     """Compare the file with the recorded snapshot, after two runs."""
-    result = two_days(path, offers)
+    result = two_days(conn, path, offers)
 
     if os.environ.get("UPDATE_SNAPSHOT"):
         with open(SNAPSHOT_PATH, "w", encoding="utf-8") as file:
@@ -414,9 +504,16 @@ def test_snapshot(path, offers):
         assert result == json.load(file)
 
 
-def test_same_file_as_the_old_code_apart_from_source(path, offers):
-    """Without the "Source" column, the file is the one of the T0.5 snapshot."""
-    result = two_days(path, offers)
+def test_same_file_as_the_old_code_apart_from_source(conn, path, offers):
+    """Without the "Source" column and the drop-down list, the file is the one
+    of the T0.5 snapshot."""
+    result = two_days(conn, path, offers)
     with open(OLD_SNAPSHOT_PATH, encoding="utf-8") as file:
         old = json.load(file)
-    assert {day: drop_column(state, "Source") for day, state in result.items()} == old
+
+    def comparable(state):
+        return {key: value for key, value in state.items() if key != "listes"}
+
+    assert {day: comparable(drop_column(state, "Source")) for day, state in result.items()} == {
+        day: comparable(state) for day, state in old.items()
+    }
