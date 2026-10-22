@@ -17,11 +17,12 @@ ALL = "all"
 # Hidden by the default filter: the user already said no.
 DEFAULT_STATUSES = frozenset({None, *STATUSES} - {"not_for_me"})
 
-# Marker shown in a column of the table, by priority: red and blue are
-# never hidden by yellow, and an offline offer keeps its red or blue.
+# Marker of an offer, by priority: red, blue and orange are never hidden
+# by yellow, and an offline offer keeps its color.
 # Emojis: a table cell cannot show Material icons.
 MARKER_REJECTED = "🔴"
 MARKER_APPLIED = "🔵"
+MARKER_NOT_FOR_ME = "🟠"
 MARKER_FAVORITE = "🟡"
 MARKER_OFFLINE = "⚪"
 NO_MARKER = ""
@@ -142,6 +143,8 @@ def marker(stored, on_favorites_page=False):
         return MARKER_REJECTED
     if stored.status == "applied":
         return MARKER_APPLIED
+    if stored.status == "not_for_me":
+        return MARKER_NOT_FOR_ME
     if stored.favorite and not on_favorites_page:
         return MARKER_FAVORITE
     if not stored.online:

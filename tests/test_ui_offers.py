@@ -242,6 +242,7 @@ def test_table_frame():
         "Score": 3,
         "Titre": "Data Analyst",
         "Entreprise": "ACME",
+        "Source": "test",
         "Pays": "FRANCE",
         "Ville": "PARIS",
         "Durée": 12,
@@ -271,6 +272,7 @@ def test_no_yellow_in_the_favorites_table():
         ({"status": "applied"}, "#DBEAFE"),
         ({"favorite": True}, "#FEF3C7"),
         ({"online": False}, "#E5E7EB"),
+        ({"status": "not_for_me"}, "#FFEDD5"),
         ({"status": "rejected", "favorite": True}, "#FDE2E1"),
     ],
 )
@@ -279,6 +281,18 @@ def test_whole_line_takes_the_color_of_its_marker(changes, color):
     styles = offer_table.row_styles(frame.iloc[0])
     assert len(styles) == len(offer_table.COLUMNS)
     assert all(f"background-color: {color}" in style for style in styles)
+
+
+def test_open_line_is_highlighted_above_its_color():
+    frame = table_frame([make_stored(1), make_stored(2, status="rejected")], {})
+    assert offer_table.row_styles(frame.iloc[1], open_row=1) == [offer_table.OPEN_ROW_STYLE] * len(
+        offer_table.COLUMNS
+    )
+    assert offer_table.row_styles(frame.iloc[0], open_row=1) == [""] * len(offer_table.COLUMNS)
+
+
+def test_source_column_shows_the_label(at):
+    assert set(table(at)["Source"]) == {"Business France"}
 
 
 def test_line_without_marker_keeps_the_default_color():

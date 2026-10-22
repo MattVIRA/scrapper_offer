@@ -1,7 +1,8 @@
 """Card of one offer: everything about it, and its follow-up to edit.
 
-Shown in a side drawer (st.dialog) over the list, so that the list stays
-as it was. Opening the card marks the offer as read (offer_table).
+Shown beside the list, in the page: the list stays visible and
+clickable, with the line of the card highlighted. (A st.dialog greys the
+page behind it.) Opening the card marks the offer as read (offer_table).
 """
 
 from collections.abc import Callable
@@ -12,7 +13,7 @@ from functools import partial
 import streamlit as st
 
 from offers.sources import source_label
-from offers.storage.database import save_follow_up
+from offers.storage.database import save_follow_up, set_favorite
 from offers.ui.labels import (
     LETTER_CHOICES,
     STATUS_CHOICES,
@@ -78,7 +79,7 @@ def close_card(settings):
 
 
 def show_card(settings, stored, duplicates, action, editable=True, navigation=None):
-    """Open the card of a StoredOffer.
+    """Show the card of a StoredOffer, in the current column.
 
     duplicates: references of its probable duplicates.
     action: CardAction of the button at the bottom; it closes the card.
@@ -86,23 +87,53 @@ def show_card(settings, stored, duplicates, action, editable=True, navigation=No
     navigation: Navigation for the arrows; None hides them (offer no
         longer shown, after a change of its status for example).
     """
-    dialog = st.dialog(
-        stored.offer.title,
-        width="large",
-        position="right",
-        on_dismiss=partial(close_card, settings),
-    )
-    dialog(card_body)(settings, stored, duplicates, action, editable, navigation)
+    with st.container(border=True):
+        show_header(settings, stored, navigation, editable)
+        show_summary(stored, duplicates)
+        if editable:
+            show_follow_up_form(settings, stored)
+        else:
+            show_follow_up(stored)
+        show_action(settings, stored, action)
 
 
-def card_body(settings, stored, duplicates, action, editable, navigation):
+def show_header(settings, stored, navigation, editable):
+    """Title, « Fermer », arrows and the favorite button."""
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.subheader(stored.offer.title)
+        st.button(
+            "Fermer",
+            icon=":material/close:",
+            type="tertiary",
+            key=settings.state_key("card_close"),
+            on_click=close_card,
+            args=(settings,),
+        )
     if navigation:
         show_arrows(settings, navigation)
-    show_summary(stored, duplicates)
+    if st.session_state.pop(settings.state_key("card_saved"), False):
+        st.success("Suivi enregistré.", icon=":material/check_circle:")
     if editable:
-        show_follow_up_form(settings, stored)
-    else:
-        show_follow_up(stored)
+        show_favorite_button(settings, stored)
+
+
+def show_favorite_button(settings, stored):
+    """Add to or remove from the favorites at once, without « Enregistrer »."""
+    st.button(
+        "Retirer des favoris" if stored.favorite else "Ajouter aux favoris",
+        icon=":material/star_border:" if stored.favorite else ":material/star:",
+        key=settings.state_key("card_favorite"),
+        on_click=switch_favorite,
+        args=(stored.id, not stored.favorite),
+    )
+
+
+def switch_favorite(offer_id, favorite):
+    with open_database(st.session_state.db_path) as conn:
+        set_favorite(conn, [offer_id], favorite, datetime.now())
+
+
+def show_action(settings, stored, action):
     st.button(
         action.label,
         icon=action.icon,
@@ -120,14 +151,11 @@ def run_action(settings, action, offer_id):
     """
     action.run([offer_id])
     close_card(settings)
-    # The whole page, not only the card, runs again.
-    st.rerun()
 
 
 def go_to(settings, offer_id):
-    """Callback of an arrow: the whole page runs again with the other offer."""
+    """Callback of an arrow: the card shows the other offer, read."""
     open_card(settings, offer_id)
-    st.rerun()
 
 
 def show_arrows(settings, navigation):
@@ -262,7 +290,8 @@ def show_follow_up_form(settings, stored):
                     notes,
                     datetime.now(),
                 )
-            close_card(settings)
+            # The card stays open; the page runs again to show the change.
+            st.session_state[settings.state_key("card_saved")] = True
             st.rerun()
 
 

@@ -12,7 +12,7 @@ from streamlit.testing.v1 import AppTest
 
 from offers.__main__ import UI_APP
 from offers.sources.base import FoundOffer
-from offers.storage.database import connect, save_source_result, save_tracking_details
+from offers.storage.database import connect, hide, save_source_result, save_tracking_details
 from offers.ui import offer_card, offer_table
 from offers.ui.offer_table import PageSettings
 from tests.factories import make_stored
@@ -114,7 +114,9 @@ def test_follow_up_is_saved_by_the_form(start, db_path, ids):
     first = by_reference(db_path)["VIE1"]
     assert (first.status, first.letter_status, first.favorite) == ("applied", "written", True)
     assert (first.applied_on, first.notes) == ("2026-10-21", "Relancer lundi")
-    assert CARD not in at.session_state
+    # The card stays open beside the list, which shows the change.
+    assert at.session_state[CARD] == ids["VIE1"]
+    assert "Suivi enregistré." in texts(at.success)
     assert table(at)[offer_table.STATUS][0] == "Postulé"
 
 
@@ -237,3 +239,50 @@ def test_navigation(offer_id, expected):
 
 def texts(elements):
     return [element.value for element in elements]
+
+
+# --- Card beside the list -----------------------------------------------------
+
+
+def test_card_is_beside_the_list(start, ids):
+    at = start(ids["VIE2"])
+
+    # The list stays shown with the card.
+    assert list(table(at)["Titre"]) == ["Data analyst", "Comptable", "Comptable"]
+    assert at.subheader[0].value == "Comptable"
+
+
+def test_close_button(start, ids):
+    at = start(ids["VIE1"])
+    at.button(key="offers_card_close").click().run()
+    assert CARD not in at.session_state
+    assert not at.link_button
+
+
+def test_favorite_button_writes_at_once(start, db_path, ids):
+    at = start(ids["VIE1"])
+    assert at.button(key="offers_card_favorite").label == "Ajouter aux favoris"
+
+    at.button(key="offers_card_favorite").click().run()
+
+    assert by_reference(db_path)["VIE1"].favorite
+    assert at.button(key="offers_card_favorite").label == "Retirer des favoris"
+    assert table(at)["Favori"][0] == offer_table.FAVORITE_MARK
+
+    at.button(key="offers_card_favorite").click().run()
+    assert not by_reference(db_path)["VIE1"].favorite
+
+
+def test_no_favorite_button_in_the_trash(open_trash_card):
+    assert not [b for b in open_trash_card.button if b.key == "trash_card_favorite"]
+
+
+@pytest.fixture
+def open_trash_card(monkeypatch, db_path, ids):
+    conn = connect(db_path)
+    hide(conn, [ids["VIE1"]], NOW)
+    conn.close()
+    monkeypatch.setattr(sys, "argv", ["app.py", "--db", str(db_path)])
+    at = AppTest.from_file(str(UI_APP), default_timeout=TIMEOUT).run()
+    at.session_state["trash_card"] = ids["VIE1"]
+    return at.switch_page("app_pages/trash.py").run()

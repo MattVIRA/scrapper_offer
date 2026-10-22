@@ -56,7 +56,7 @@ DUPLICATE = "Doublon de"
 STATUS = "Statut"
 # fmt: off
 COLUMNS = [
-    MARKER, UNREAD, DUPLICATE, "Score", "Titre", "Entreprise", "Pays", "Ville",
+    MARKER, UNREAD, DUPLICATE, "Score", "Titre", "Entreprise", "Source", "Pays", "Ville",
     "Durée", "Publiée le", "Ajoutée le", STATUS, "Lettre", "Favori", "En ligne",
 ]
 # fmt: on
@@ -66,11 +66,16 @@ TEXT_COLOR = "#1F2937"
 # fmt: off
 ROW_STYLES = {
     browsing.MARKER_REJECTED: f"background-color: #FDE2E1; color: {TEXT_COLOR}",
-    browsing.MARKER_APPLIED:  f"background-color: #DBEAFE; color: {TEXT_COLOR}",
-    browsing.MARKER_FAVORITE: f"background-color: #FEF3C7; color: {TEXT_COLOR}",
-    browsing.MARKER_OFFLINE:  "background-color: #E5E7EB; color: #6B7280",
+    browsing.MARKER_APPLIED:    f"background-color: #DBEAFE; color: {TEXT_COLOR}",
+    browsing.MARKER_NOT_FOR_ME: f"background-color: #FFEDD5; color: {TEXT_COLOR}",
+    browsing.MARKER_FAVORITE:   f"background-color: #FEF3C7; color: {TEXT_COLOR}",
+    browsing.MARKER_OFFLINE:    "background-color: #E5E7EB; color: #6B7280",
 }
 # fmt: on
+# The line whose card is open, above the color of its follow-up.
+OPEN_ROW_STYLE = "background-color: #4F46E5; color: #FFFFFF; font-weight: bold"
+# Widths of the list and of the card beside it.
+LIST_AND_CARD = [3, 2]
 
 
 @dataclass(frozen=True)
@@ -112,8 +117,16 @@ def show_offer_page(settings):
     show_counters(shown)
     show_undo(settings)
     show_actions(settings, shown)
-    show_table(settings, shown, tags)
-    show_open_card(settings, offers, shown, tags)
+    card = opened_offer(settings, offers)
+    if card is None:
+        show_table(settings, shown, tags)
+        return
+    # The card beside the list: the list stays visible and clickable.
+    list_column, card_column = st.columns(LIST_AND_CARD, gap="medium")
+    with list_column:
+        show_table(settings, shown, tags, open_id=card.id)
+    with card_column:
+        show_card(settings, card, shown, tags)
 
 
 def page_title(settings, offers):
@@ -150,11 +163,8 @@ def mark_card_read(conn, settings, offers):
     return True
 
 
-def show_open_card(settings, offers, shown, tags):
-    """Show the card of the opened offer, if any, with arrows to the shown offers."""
-    stored = opened_offer(settings, offers)
-    if stored is None:
-        return
+def show_card(settings, stored, shown, tags):
+    """Show the card of an offer, with arrows to the offers shown."""
     offer_card.show_card(
         settings,
         stored,
@@ -414,11 +424,12 @@ def show_undo(settings):
 # --- Table --------------------------------------------------------------------
 
 
-def show_table(settings, shown, tags):
+def show_table(settings, shown, tags, open_id=None):
     """Show the offers as read-only lines, colored by their follow-up.
 
     The boxes on the left check offers for the actions; a click on a cell
-    opens the card of its line.
+    opens the card of its line. open_id: offer whose card is open, its
+    line is highlighted.
     """
     if not shown:
         st.info("Aucune offre ne correspond aux filtres.", icon=":material/filter_alt_off:")
@@ -430,8 +441,9 @@ def show_table(settings, shown, tags):
     st.session_state[settings.state_key("table_key")] = key
     frame = table_frame(shown, tags, on_favorites_page=settings.favorites_only)
     checked = st.session_state[settings.state_key("selected")]
+    open_row = row_ids.index(open_id) if open_id in row_ids else None
     st.dataframe(
-        frame.style.apply(row_styles, axis=1),
+        frame.style.apply(row_styles, axis=1, open_row=open_row),
         key=key,
         # st.dataframe takes no args for its callback.
         on_select=partial(on_table_select, settings, key),
@@ -486,6 +498,7 @@ def table_row(stored, tags, on_favorites_page):
         "Score": stored.score,
         "Titre": offer.title,
         "Entreprise": offer.company,
+        "Source": source_label(offer.source),
         "Pays": offer.country,
         "Ville": offer.city,
         "Durée": offer.duration_months,
@@ -498,8 +511,13 @@ def table_row(stored, tags, on_favorites_page):
     }
 
 
-def row_styles(row):
-    """Return the CSS of each cell of a table row: the color of its marker."""
+def row_styles(row, open_row=None):
+    """Return the CSS of each cell of a table row: the color of its marker.
+
+    open_row: number of the row whose card is open, highlighted instead.
+    """
+    if row.name == open_row:
+        return [OPEN_ROW_STYLE] * len(row)
     return [ROW_STYLES.get(row[MARKER], "")] * len(row)
 
 

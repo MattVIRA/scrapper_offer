@@ -182,6 +182,10 @@ def test_counters_of_no_offer():
         ({"status": "rejected", "online": False}, browsing.MARKER_REJECTED),
         ({"favorite": True, "online": False}, browsing.MARKER_FAVORITE),
         ({"status": "interesting"}, browsing.NO_MARKER),
+        ({"status": "not_for_me"}, browsing.MARKER_NOT_FOR_ME),
+        # Orange before yellow and grey.
+        ({"status": "not_for_me", "favorite": True}, browsing.MARKER_NOT_FOR_ME),
+        ({"status": "not_for_me", "online": False}, browsing.MARKER_NOT_FOR_ME),
     ],
 )
 def test_marker(changes, expected):
@@ -204,6 +208,7 @@ def test_markers_are_distinct():
     markers = [
         browsing.MARKER_REJECTED,
         browsing.MARKER_APPLIED,
+        browsing.MARKER_NOT_FOR_ME,
         browsing.MARKER_FAVORITE,
         browsing.MARKER_OFFLINE,
         browsing.NO_MARKER,
