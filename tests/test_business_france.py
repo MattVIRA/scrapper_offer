@@ -10,7 +10,11 @@ from offers.config import Search, SourceConfig
 from offers.model import Offer
 from offers.sources import business_france as bf
 from offers.sources.base import FoundOffer
-from tests.sources_contract import check_found_offers, check_online_offers
+from tests.sources_contract import (
+    check_found_offers,
+    check_online_offers,
+    check_only_active_searches,
+)
 
 # URL of config.yaml, copied here so the test does not depend on the
 # current settings.
@@ -315,6 +319,21 @@ def test_collect_reads_each_search(business_france_page, raw_offers):
     assert first_body["specializationsIds"] == ["243", "210", "212", "59", "255", "24"]
     assert session.requests[2][2]["json"] == {"limit": bf.PAGE_SIZE, "skip": 0, "query": ""}
     check_found_offers(found, bf.BusinessFranceSource.name)
+
+
+def test_collect_skips_the_searches_switched_off(business_france_page, raw_offers):
+    session = FakeSession(
+        [FakeResponse(text=business_france_page)] + api_pages([raw_offers[:2]], total=2)
+    )
+    searches = [Search("A", CONFIG_URL, enabled=False), Search("B", bf.SEARCH_PAGE_URL)]
+    source = make_source(session, searches)
+
+    found = source.collect()
+
+    assert {item.search_name for item in found} == {"B"}
+    # One page read and one search: "A" is not queried.
+    assert [method for method, _, _ in session.requests] == ["GET", "POST"]
+    check_only_active_searches(found, source.config)
 
 
 def test_online_offers_reads_without_filters(business_france_page, raw_offers):

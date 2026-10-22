@@ -10,6 +10,7 @@ from datetime import date, datetime
 from importlib.resources import files
 from pathlib import Path
 
+from offers.backups import remove_old_backups
 from offers.errors import OffersError
 from offers.model import Offer
 from offers.scoring.keywords import normalize
@@ -28,7 +29,6 @@ MIGRATIONS = [
 KEYWORDS_METHOD = "keywords"
 BACKUP_DIR = "backup"
 BACKUP_PREFIX = "offers_"
-BACKUPS_KEPT = 30
 # Spaces and punctuation, ignored when comparing titles and companies.
 SEPARATORS = re.compile(r"[\W_]+")
 # Offer fields stored in their own column of the offers table.
@@ -471,7 +471,7 @@ def backup_database(path, now):
         backup_dir.mkdir(exist_ok=True)
         copy_database(path, temporary)
         os.replace(temporary, target)
-        remove_old_backups(backup_dir)
+        remove_old_backups(backup_dir, f"{BACKUP_PREFIX}*.db")
     except (OSError, sqlite3.Error) as err:
         temporary.unlink(missing_ok=True)
         raise StorageError(
@@ -492,14 +492,6 @@ def copy_database(source_path, target_path):
             target.close()
     finally:
         source.close()
-
-
-def remove_old_backups(backup_dir):
-    """Delete the oldest backups, keeping BACKUPS_KEPT."""
-    # The date in the name sorts the backups from the oldest.
-    backups = sorted(backup_dir.glob(f"{BACKUP_PREFIX}*.db"))
-    for old in backups[:-BACKUPS_KEPT]:
-        old.unlink()
 
 
 def probable_duplicates(conn):

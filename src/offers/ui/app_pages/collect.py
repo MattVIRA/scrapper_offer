@@ -5,7 +5,7 @@ from datetime import date, datetime
 import pandas as pd
 import streamlit as st
 
-from offers.config import load_config
+from offers.config import ConfigError, load_config, set_search_enabled
 from offers.exports.excel import ExcelError
 from offers.pipeline import export_workbook
 from offers.sources import SOURCES, source_label
@@ -23,6 +23,9 @@ RUNS_SHOWN = 20
 # How often the page looks at a running collection.
 PROGRESS_REFRESH = "2s"
 RUN_RESULTS = {"ok": "OK", "error": "Erreur"}
+# config.yaml is saved next to the database backups.
+BACKUP_DIR = "backup"
+CONFIG_ERROR_KEY = "collect_config_error"
 
 
 def start_collection(runner, config, chosen):
@@ -33,6 +36,45 @@ def start_collection(runner, config, chosen):
         st.session_state.excel_path,
         datetime.now(),
     )
+
+
+def search_key(source_name, search_name):
+    return f"collect_search_{source_name}_{search_name}"
+
+
+def switch_search(source_name, search_name):
+    """Callback of a search toggle: write it at once into config.yaml."""
+    key = search_key(source_name, search_name)
+    enabled = st.session_state[key]
+    try:
+        set_search_enabled(
+            st.session_state.config_path,
+            source_name,
+            search_name,
+            enabled,
+            st.session_state.db_path.parent / BACKUP_DIR,
+            datetime.now(),
+        )
+    except ConfigError as err:
+        # The toggle goes back to what the file says, and the page explains why.
+        st.session_state[key] = not enabled
+        st.session_state[CONFIG_ERROR_KEY] = str(err)
+
+
+def show_search_toggles(source, disabled):
+    """One toggle per search of a source, written at once into config.yaml."""
+    if not source.searches:
+        st.caption("Aucune recherche dans config.yaml.")
+    for search in source.searches:
+        key = search_key(source.name, search.name)
+        st.session_state.setdefault(key, search.enabled)
+        st.toggle(
+            search.name,
+            key=key,
+            disabled=disabled,
+            on_change=switch_search,
+            args=(source.name, search.name),
+        )
 
 
 @st.fragment(run_every=PROGRESS_REFRESH)
@@ -96,14 +138,17 @@ running = job is not None and job.running
 config = load_config(str(st.session_state.config_path), set(SOURCES))
 
 st.subheader("Sources")
+st.caption("Les recherches coupées ne sont plus interrogées ; elles restent dans config.yaml.")
+config_error = st.session_state.pop(CONFIG_ERROR_KEY, None)
+if config_error:
+    st.error(f"Recherche non modifiée. {config_error}", icon=":material/error:")
 chosen = []
 for source in config.enabled_sources():
     if st.checkbox(
         source_label(source.name), value=True, key=f"collect_{source.name}", disabled=running
     ):
         chosen.append(source)
-    searches = ", ".join(search.name for search in source.searches) or "aucune"
-    st.caption(f"Recherches : {searches}")
+    show_search_toggles(source, disabled=running)
 if not config.enabled_sources():
     st.info("Aucune source activée dans config.yaml.", icon=":material/info:")
 st.button(

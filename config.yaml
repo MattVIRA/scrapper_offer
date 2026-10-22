@@ -8,6 +8,8 @@ sources:
     # Pour en ajouter une : fais ta recherche sur le site, copie l'adresse
     # de la page et colle-la dans "url". Le "name" est libre, il apparaît
     # dans la colonne "Recherche" du fichier Excel.
+    # Pour couper une recherche sans l'effacer : enabled: false (aussi
+    # depuis la page Collecte de l'interface).
     searches:
       - name: "Recherche principale"
         url: "https://mon-vie-via.businessfrance.fr/offres/recherche?query=&specializationsIds=243&specializationsIds=210&specializationsIds=212&specializationsIds=59&specializationsIds=255&specializationsIds=24&geographicZones=2&geographicZones=3&geographicZones=4&geographicZones=6&geographicZones=5&studiesLevelId=4&teletravail=0&porteEnv=0"
@@ -15,6 +17,7 @@ sources:
 # Mots-clés cherchés dans le titre, la description et le profil.
 # Majuscules et accents ne comptent pas. Le score d'une offre est le
 # nombre de mots-clés trouvés.
+        enabled: true
 keywords_include:
   - python
   - machine learning

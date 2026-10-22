@@ -32,3 +32,9 @@ def check_online_offers(online, found, source_name):
     check_found_offers([FoundOffer(offer, "online") for offer in online], source_name)
     missing = {item.offer.reference for item in found} - {offer.reference for offer in online}
     assert not missing, missing
+
+
+def check_only_active_searches(found, source_config):
+    """Check that Source.collect() queried only the active searches."""
+    active = {search.name for search in source_config.active_searches()}
+    assert {item.search_name for item in found} <= active

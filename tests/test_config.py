@@ -1,10 +1,13 @@
 """Tests of config.yaml reading (offers.config)."""
 
 import os
+import shutil
+from datetime import datetime
 
 import pytest
 
-from offers.config import ConfigError, Search, load_config
+from offers import config as config_module
+from offers.config import ConfigError, Search, load_config, set_search_enabled
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KNOWN = {"business_france", "other"}
@@ -83,6 +86,10 @@ def test_enabled_defaults_to_true(tmp_path):
         ),
         ("sources:\n  other: {}\nkeywords_include: python\n", "« keywords_include » doit"),
         ("sources:\n  other: {}\nkeywords_exclude: [1]\n", "« keywords_exclude ».*1"),
+        (
+            "sources:\n  other:\n    searches:\n      - {name: a, url: u, enabled: non}\n",
+            "n°1 : « enabled » doit valoir true ou false",
+        ),
     ],
 )
 def test_config_errors(tmp_path, text, message):
@@ -94,3 +101,106 @@ def test_missing_file(tmp_path):
     with pytest.raises(ConfigError, match="introuvable") as error:
         load_config(str(tmp_path / "absent.yaml"), KNOWN)
     assert isinstance(error.value.__cause__, FileNotFoundError)
+
+
+# --- Searches switched on or off ----------------------------------------------
+
+NOW = datetime(2026, 10, 22, 10, 30)
+WITH_COMMENTS = """# Réglages du script.
+sources:
+  other:
+    # Recherches à surveiller.
+    searches:
+      - name: "A"
+        url: "https://example.com/a?x=1&y=2"
+      - name: "B"   # deuxième
+        url: "https://example.com/b"
+        enabled: false
+keywords_include: [python]  # mots-clés
+"""
+
+
+def test_search_enabled_defaults_to_true_and_can_be_off(tmp_path):
+    (source,) = load_config(write(tmp_path, WITH_COMMENTS), KNOWN).sources
+    assert [(s.name, s.enabled) for s in source.searches] == [("A", True), ("B", False)]
+    assert [s.name for s in source.active_searches()] == ["A"]
+
+
+def test_switch_off_adds_the_line_and_keeps_the_comments(tmp_path):
+    path = write(tmp_path, WITH_COMMENTS)
+
+    set_search_enabled(path, "other", "A", False, tmp_path / "backup", NOW)
+
+    lines = WITH_COMMENTS.splitlines()
+    lines.insert(7, "        enabled: false")
+    assert open(path, encoding="utf-8").read().splitlines() == lines
+    (source,) = load_config(path, KNOWN).sources
+    assert source.active_searches() == []
+
+
+def test_switch_on_changes_the_line(tmp_path):
+    path = write(tmp_path, WITH_COMMENTS)
+
+    set_search_enabled(path, "other", "B", True, tmp_path / "backup", NOW)
+
+    assert open(path, encoding="utf-8").read() == WITH_COMMENTS.replace(
+        "enabled: false", "enabled: true"
+    )
+
+
+def test_old_file_is_saved_first(tmp_path):
+    path = write(tmp_path, WITH_COMMENTS)
+    set_search_enabled(path, "other", "A", False, tmp_path / "backup", NOW)
+
+    (backup,) = (tmp_path / "backup").iterdir()
+    assert backup.name == "config_2026-10-22_103000.yaml"
+    assert backup.read_text(encoding="utf-8") == WITH_COMMENTS
+
+
+def test_repository_config_only_gets_the_enabled_line(tmp_path):
+    path = tmp_path / "config.yaml"
+    shutil.copy(os.path.join(ROOT, "config.yaml"), path)
+
+    set_search_enabled(path, "business_france", "Recherche principale", False, tmp_path, NOW)
+
+    before = open(os.path.join(ROOT, "config.yaml"), encoding="utf-8").read().splitlines()
+    after = path.read_text(encoding="utf-8").splitlines()
+    added = [line for line in after if line not in before]
+    assert added == ["        enabled: false"]
+    assert len(after) == len(before) + 1
+
+
+@pytest.mark.parametrize(
+    "text, source, search, message",
+    [
+        (WITH_COMMENTS, "other", "Z", "« Z » introuvable"),
+        (WITH_COMMENTS, "business_france", "A", "pas de recherches pour la source"),
+        ("sources: [", "other", "A", "YAML valide"),
+    ],
+)
+def test_nothing_is_written_on_error(tmp_path, text, source, search, message):
+    path = write(tmp_path, text)
+
+    with pytest.raises(ConfigError, match=message):
+        set_search_enabled(path, source, search, False, tmp_path / "backup", NOW)
+
+    assert open(path, encoding="utf-8").read() == text
+    assert not (tmp_path / "backup").exists()
+
+
+def test_failed_write_keeps_the_old_file(tmp_path, monkeypatch):
+    path = write(tmp_path, WITH_COMMENTS)
+
+    def failing_replace(source, target):
+        raise PermissionError("disque protégé")
+
+    monkeypatch.setattr(config_module.os, "replace", failing_replace)
+    with pytest.raises(ConfigError, match="Impossible d'écrire.*disque protégé"):
+        set_search_enabled(path, "other", "A", False, tmp_path / "backup", NOW)
+    assert open(path, encoding="utf-8").read() == WITH_COMMENTS
+    assert not (tmp_path / "config.yaml.tmp").exists()
+
+
+def test_missing_file_to_switch(tmp_path):
+    with pytest.raises(ConfigError, match="Impossible de lire"):
+        set_search_enabled(tmp_path / "absent.yaml", "other", "A", False, tmp_path, NOW)

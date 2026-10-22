@@ -9,6 +9,7 @@ from streamlit.testing.v1 import AppTest
 from offers import sources as registry
 from offers import summary
 from offers.__main__ import UI_APP
+from offers.config import load_config
 from offers.errors import OffersError
 from offers.exports.excel import ExcelReport
 from offers.storage.database import connect
@@ -117,7 +118,8 @@ def test_sources_are_checked_with_their_searches(open_page):
         ("Source qui marche", True),
         ("Source en panne", True),
     ]
-    assert "Recherches : Data Europe" in texts(at.caption)
+    assert [(t.label, t.value) for t in at.toggle] == [("Data Europe", True)]
+    assert "Aucune recherche dans config.yaml." in texts(at.caption)
     assert "Aucun lancement pour l'instant." in texts(at.info)
 
 
@@ -228,3 +230,42 @@ def test_export_with_the_excel_open(open_page, paths):
 
     assert texts(at.error) == ["offres.xlsx est ouvert : ferme l'Excel puis relance."]
     assert not paths["excel"].exists()
+
+
+# --- Searches -----------------------------------------------------------------
+
+
+def test_switching_a_search_off_writes_config_yaml(open_page, paths):
+    at = open_page()
+
+    at.toggle(key="collect_search_fake_Data Europe").set_value(False).run()
+
+    assert not at.exception and not at.error
+    text = paths["config"].read_text(encoding="utf-8")
+    assert "enabled: false" in text
+    (fake, _) = load_config(str(paths["config"]), {"fake", "broken"}).sources
+    assert fake.active_searches() == []
+    # The old file is saved next to the database backups.
+    (backup,) = (paths["db"].parent / "backup").glob("config_*.yaml")
+    assert backup.read_text(encoding="utf-8") == CONFIG
+
+
+def test_failed_switch_is_explained_and_undone(open_page, paths):
+    # A file where the backup folder should be: the backup fails.
+    (paths["db"].parent / "backup").write_text("pas un dossier")
+    at = open_page()
+
+    at.toggle(key="collect_search_fake_Data Europe").set_value(False).run()
+
+    assert at.error[0].value.startswith("Recherche non modifiée. Impossible de sauvegarder")
+    assert at.toggle[0].value is True
+    assert paths["config"].read_text(encoding="utf-8") == CONFIG
+
+
+def test_toggles_are_off_while_collecting(open_page):
+    SlowSource.release.clear()
+    at = open_page(fake=SlowSource)
+    button(at, "Lancer la collecte").click().run()
+    assert at.toggle[0].disabled
+    SlowSource.release.set()
+    assert collect_job.get_runner().job.finished.wait(WAIT)

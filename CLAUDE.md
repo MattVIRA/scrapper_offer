@@ -110,6 +110,10 @@ sans accord sur ses fichiers. Les tests suffisent pour vérifier.
 - Une offre n'est marquée « Plus en ligne » que si sa source donne la
   liste complète de ses offres ; chaque source le fait pour ses offres,
   même si une autre est en erreur.
+- `config.yaml` n'est modifié par le programme que pour couper ou
+  rallumer une recherche (page Collecte, `config.set_search_enabled`) :
+  avec `ruamel.yaml`, qui garde commentaires et mise en page, après une
+  copie dans `data/backup/`, et par écriture atomique.
 - Le schéma évolue seulement par une nouvelle migration ajoutée à la fin
   de `database.MIGRATIONS` (version dans `PRAGMA user_version`).
 
