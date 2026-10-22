@@ -17,15 +17,23 @@ ALL = "all"
 # Hidden by the default filter: the user already said no.
 DEFAULT_STATUSES = frozenset({None, *STATUSES} - {"not_for_me"})
 
-# Marker of an offer, by priority: red, blue and orange are never hidden
-# by yellow, and an offline offer keeps its color.
+# Marker of an offer, by priority: a status is never hidden by yellow, and
+# an offline offer keeps its color.
 # Emojis: a table cell cannot show Material icons.
 MARKER_REJECTED = "🔴"
 MARKER_APPLIED = "🔵"
 MARKER_NOT_FOR_ME = "🟠"
+MARKER_INTERESTING = "🟢"
 MARKER_FAVORITE = "🟡"
 MARKER_OFFLINE = "⚪"
 NO_MARKER = ""
+# Status code -> marker.
+STATUS_MARKERS = {
+    "rejected": MARKER_REJECTED,
+    "applied": MARKER_APPLIED,
+    "not_for_me": MARKER_NOT_FOR_ME,
+    "interesting": MARKER_INTERESTING,
+}
 
 
 @dataclass(frozen=True)
@@ -45,7 +53,9 @@ class OfferFilter:
     min_score: int | None = None
     online: str = ONLINE
     added_since: date | None = None
-    # Searched in the title and the company, without case or accents.
+    # Searched in the title, company, city, country and reference, without
+    # case or accents. A whole reference ("VIE243542") ignores the other
+    # filters, so that an offer can always be found by it.
     text: str = ""
     favorites_only: bool = False
     # True: only the offers in the trash; False: only the others.
@@ -73,13 +83,32 @@ class FilterChoices:
 
 def filter_offers(offers, offer_filter):
     """Return the StoredOffer that match the filter, in the same order."""
+    by_reference = [
+        stored
+        for stored in offers
+        if has_reference(stored, offer_filter.text) and is_on_page(stored, offer_filter)
+    ]
+    if by_reference:
+        return by_reference
     return [stored for stored in offers if matches(stored, offer_filter)]
+
+
+def has_reference(stored, text):
+    """Tell whether text is the whole reference of the offer, without case."""
+    return normalize(text.strip()) == normalize(stored.offer.reference)
+
+
+def is_on_page(stored, offer_filter):
+    """Tell whether the offer belongs to the page: trash or not, favorites."""
+    return stored.hidden == offer_filter.in_trash and (
+        stored.favorite or not offer_filter.favorites_only
+    )
 
 
 def matches(stored, offer_filter):
     """Tell whether a StoredOffer matches every part of the filter."""
     return (
-        stored.hidden == offer_filter.in_trash
+        is_on_page(stored, offer_filter)
         and is_in(stored.offer.source, offer_filter.sources)
         and is_in(stored.offer.country, offer_filter.countries)
         and stored.status in offer_filter.statuses
@@ -88,7 +117,6 @@ def matches(stored, offer_filter):
         and has_online_state(stored, offer_filter.online)
         and added_since(stored, offer_filter.added_since)
         and contains_text(stored, offer_filter.text)
-        and (stored.favorite or not offer_filter.favorites_only)
     )
 
 
@@ -114,12 +142,14 @@ def added_since(stored, day):
 
 
 def contains_text(stored, text):
-    """Tell whether the title or the company contains text, without case or accents."""
+    """Tell whether the title, company, city, country or reference contains
+    text, without case or accents."""
     searched = normalize(text.strip())
     if not searched:
         return True
     offer = stored.offer
-    return searched in normalize(f"{offer.title} {offer.company or ''}")
+    fields = (offer.title, offer.company, offer.city, offer.country, offer.reference)
+    return searched in normalize(" ".join(field or "" for field in fields))
 
 
 def is_unread(stored):
@@ -139,12 +169,8 @@ def counters(offers):
 
 def marker(stored, on_favorites_page=False):
     """Return the marker of an offer; no yellow on the Favorites page."""
-    if stored.status == "rejected":
-        return MARKER_REJECTED
-    if stored.status == "applied":
-        return MARKER_APPLIED
-    if stored.status == "not_for_me":
-        return MARKER_NOT_FOR_ME
+    if stored.status in STATUS_MARKERS:
+        return STATUS_MARKERS[stored.status]
     if stored.favorite and not on_favorites_page:
         return MARKER_FAVORITE
     if not stored.online:

@@ -122,12 +122,28 @@ def test_added_since(offers):
         ("societe generale", [3]),  # company, without accents
         ("générale", [3]),
         ("acme", [1, 2, 4, 6]),  # default company of make_offer
+        ("allemagne", [1, 3]),  # country
+        ("pari", [1, 2, 3, 4, 6]),  # city
+        ("REF", [1, 2, 3, 4, 6]),  # part of a reference
         ("", [1, 2, 3, 4, 6]),
         ("introuvable", []),
     ],
 )
 def test_text(offers, text, expected):
     assert ids(filter_offers(offers, replace(SHOW_ALL, text=text))) == expected
+
+
+@pytest.mark.parametrize("text", ["REF4", " ref4 "])
+def test_whole_reference_ignores_the_other_filters(offers, text):
+    # Offer 4 is "Pas pour moi", hidden by the default filter.
+    assert ids(filter_offers(offers, OfferFilter(text=text))) == [4]
+
+
+def test_whole_reference_stays_on_its_page(offers):
+    # Offer 5 is in the trash; offer 1 is not a favorite.
+    assert ids(filter_offers(offers, OfferFilter(text="REF5"))) == []
+    assert ids(filter_offers(offers, OfferFilter(text="REF5", in_trash=True))) == [5]
+    assert ids(filter_offers(offers, OfferFilter(text="REF1", favorites_only=True))) == []
 
 
 def test_favorites_only(offers):
@@ -164,6 +180,11 @@ def test_counters_of_no_offer():
     assert counters([]) == browsing.Counters(total=0, unread=0, by_status={}, letters_to_write=0)
 
 
+def test_unread():
+    assert browsing.is_unread(make_stored())
+    assert not browsing.is_unread(make_stored(read_at=datetime(2026, 10, 22, 9, 0)))
+
+
 # --- Markers ------------------------------------------------------------------
 
 
@@ -173,16 +194,17 @@ def test_counters_of_no_offer():
         ({}, browsing.NO_MARKER),
         ({"status": "rejected"}, browsing.MARKER_REJECTED),
         ({"status": "applied"}, browsing.MARKER_APPLIED),
+        ({"status": "interesting"}, browsing.MARKER_INTERESTING),
         ({"favorite": True}, browsing.MARKER_FAVORITE),
         ({"online": False}, browsing.MARKER_OFFLINE),
-        # Yellow never before red or blue.
+        # A status is never hidden by yellow; an offline offer keeps its color.
         ({"status": "rejected", "favorite": True}, browsing.MARKER_REJECTED),
         ({"status": "applied", "favorite": True}, browsing.MARKER_APPLIED),
-        # An offline offer keeps its color.
+        ({"status": "interesting", "favorite": True}, browsing.MARKER_INTERESTING),
         ({"status": "rejected", "online": False}, browsing.MARKER_REJECTED),
+        ({"status": "interesting", "online": False}, browsing.MARKER_INTERESTING),
         ({"favorite": True, "online": False}, browsing.MARKER_FAVORITE),
         ({"status": "not_for_me"}, browsing.MARKER_NOT_FOR_ME),
-        # Orange before yellow and grey.
         ({"status": "not_for_me", "favorite": True}, browsing.MARKER_NOT_FOR_ME),
         ({"status": "not_for_me", "online": False}, browsing.MARKER_NOT_FOR_ME),
     ],
@@ -203,21 +225,11 @@ def test_no_yellow_on_the_favorites_page(changes, expected):
     assert marker(make_stored(**changes), on_favorites_page=True) == expected
 
 
-def test_markers_are_distinct():
-    markers = [
-        browsing.MARKER_REJECTED,
-        browsing.MARKER_APPLIED,
-        browsing.MARKER_NOT_FOR_ME,
-        browsing.MARKER_FAVORITE,
-        browsing.MARKER_OFFLINE,
-        browsing.NO_MARKER,
-    ]
+def test_every_status_has_its_own_marker():
+    assert set(browsing.STATUS_MARKERS) == set(browsing.STATUSES)
+    markers = [*browsing.STATUS_MARKERS.values(), browsing.MARKER_FAVORITE,
+               browsing.MARKER_OFFLINE, browsing.NO_MARKER]  # fmt: skip
     assert len(set(markers)) == len(markers)
-
-
-def test_unread():
-    assert browsing.is_unread(make_stored())
-    assert not browsing.is_unread(make_stored(read_at=datetime(2026, 10, 22, 9, 0)))
 
 
 # --- Duplicates and choices ---------------------------------------------------

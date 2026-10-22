@@ -3,7 +3,8 @@
 Shown in the page, not in a st.dialog (which greys the page behind it):
 the description beside the list, the follow-up under the list. The list
 stays visible and clickable, with the line of the card highlighted.
-Opening the card marks the offer as read (offer_table).
+Opening the card marks the offer as read (offer_table). Each change of
+the follow-up is saved at once: the user is alone, no « Enregistrer ».
 """
 
 from collections.abc import Callable
@@ -32,6 +33,10 @@ MISSING = "—"
 NOTES_HEIGHT = 90
 ONLINE_LABEL = "Oui"
 OFFLINE_LABEL = "Plus en ligne"
+# Background of the favorites, in the card and in the list.
+FAVORITE_COLOR = "#FDE68A"
+FAVORITE_BORDER = "#F59E0B"
+FAVORITE_TEXT = "#1F2937"
 
 
 @dataclass(frozen=True)
@@ -103,7 +108,7 @@ def show_follow_up_panel(settings, stored, editable=True):
         # A short heading: the title of the offer is already beside the list.
         st.markdown(f"**Suivi** · {stored.offer.title}")
         if st.session_state.pop(settings.state_key("card_saved"), False):
-            st.success("Suivi enregistré.", icon=":material/check_circle:")
+            st.toast("Suivi enregistré.", icon=":material/check_circle:")
         if editable:
             show_follow_up_form(settings, stored)
         else:
@@ -141,13 +146,24 @@ def following_offer(navigation):
 
 
 def show_favorite_button(settings, stored):
-    """Add to or remove from the favorites at once, without « Enregistrer »."""
+    """« Favori » switches the favorite at once; yellow when it is one."""
+    key = settings.state_key("card_favorite")
+    if stored.favorite:
+        st.html(favorite_style(key))
     st.button(
-        "Retirer des favoris" if stored.favorite else "Ajouter aux favoris",
-        icon=":material/star_border:" if stored.favorite else ":material/star:",
-        key=settings.state_key("card_favorite"),
+        "Favori",
+        icon=":material/star:" if stored.favorite else ":material/star_border:",
+        key=key,
         on_click=switch_favorite,
         args=(stored.id, not stored.favorite),
+    )
+
+
+def favorite_style(key):
+    """Return the CSS that colors the button of this key as a favorite."""
+    return (
+        f"<style>.st-key-{key} button {{background-color: {FAVORITE_COLOR}; "
+        f"border-color: {FAVORITE_BORDER}; color: {FAVORITE_TEXT};}}</style>"
     )
 
 
@@ -233,6 +249,7 @@ def details(stored):
     """Return {label: text} of the facts about the offer."""
     offer = stored.offer
     return {
+        "Réf.": offer.reference,
         "Pays et ville": place(offer) or MISSING,
         "Durée": f"{offer.duration_months} mois" if offer.duration_months else MISSING,
         "Type de contrat": offer.contract_type or MISSING,
@@ -273,55 +290,81 @@ def format_applied_on(text):
 
 
 def show_follow_up_form(settings, stored):
-    """Form of the follow-up: nothing is written before « Enregistrer »."""
+    """Fields of the follow-up, each saved as soon as it changes.
+
+    The notes are saved when the field is left (or Ctrl+Entrée).
+    """
     key = partial(field_key, settings, stored.id)
-    with st.form(key("form"), border=False):
-        # Statut, Lettre and Postulé le on one line; then Favori and Notes.
-        status_column, letter_column, date_column = st.columns(3)
-        status = status_column.selectbox(
-            "Statut",
-            STATUS_CHOICES,
-            index=STATUS_CHOICES.index(to_widget_code(stored.status)),
-            format_func=status_choice_label,
-            key=key("status"),
+    save = {"on_change": save_fields, "args": (settings, stored)}
+    # Statut, Lettre and Postulé le on one line; then Notes.
+    status_column, letter_column, date_column = st.columns(3)
+    status_column.selectbox(
+        "Statut",
+        STATUS_CHOICES,
+        index=STATUS_CHOICES.index(to_widget_code(stored.status)),
+        format_func=status_choice_label,
+        key=key("status"),
+        **save,
+    )
+    letter_column.selectbox(
+        "Lettre",
+        LETTER_CHOICES,
+        index=LETTER_CHOICES.index(to_widget_code(stored.letter_status)),
+        format_func=letter_choice_label,
+        key=key("letter"),
+        **save,
+    )
+    date_column.date_input(
+        "Postulé le",
+        value=as_date(stored.applied_on),
+        format=DATE_INPUT_FORMAT,
+        key=key("applied_on"),
+        **save,
+    )
+    if stored.applied_on and as_date(stored.applied_on) is None:
+        st.caption(
+            f"Date tapée dans l'ancien Excel : « {stored.applied_on} ». "
+            "Elle est gardée tant qu'aucune date n'est choisie."
         )
-        letter = letter_column.selectbox(
-            "Lettre",
-            LETTER_CHOICES,
-            index=LETTER_CHOICES.index(to_widget_code(stored.letter_status)),
-            format_func=letter_choice_label,
-            key=key("letter"),
+    st.text_area("Notes", value=stored.notes or "", height=NOTES_HEIGHT, key=key("notes"), **save)
+
+
+def save_fields(settings, stored):
+    """Callback of the follow-up fields: write all of them, as shown."""
+    value = partial(field_value, settings, stored.id)
+    with open_database(st.session_state.db_path) as conn:
+        save_follow_up(
+            conn,
+            stored.id,
+            to_database_code(value("status")),
+            to_database_code(value("letter")),
+            applied_on_to_save(value("applied_on"), stored.applied_on),
+            value("notes"),
+            datetime.now(),
         )
-        applied_on = date_column.date_input(
-            "Postulé le",
-            value=as_date(stored.applied_on),
-            format=DATE_INPUT_FORMAT,
-            key=key("applied_on"),
-        )
-        if stored.applied_on and as_date(stored.applied_on) is None:
-            st.caption(
-                f"Date tapée dans l'ancien Excel : « {stored.applied_on} ». "
-                "Elle est gardée tant qu'aucune date n'est choisie."
-            )
-        favorite = st.checkbox("Favori", value=stored.favorite, key=key("favorite"))
-        notes = st.text_area(
-            "Notes", value=stored.notes or "", height=NOTES_HEIGHT, key=key("notes")
-        )
-        if st.form_submit_button("Enregistrer", icon=":material/save:", type="primary"):
-            with open_database(st.session_state.db_path) as conn:
-                save_follow_up(
-                    conn,
-                    stored.id,
-                    to_database_code(status),
-                    to_database_code(letter),
-                    favorite,
-                    applied_on_to_save(applied_on, stored.applied_on),
-                    notes,
-                    datetime.now(),
-                )
-            # The card stays open; the page runs again to show the change.
-            st.session_state[settings.state_key("card_saved")] = True
-            st.rerun()
+    st.session_state[settings.state_key("card_saved")] = True
+
+
+def field_value(settings, offer_id, name):
+    return st.session_state[field_key(settings, offer_id, name)]
+
+
+def refresh_fields(settings, offers):
+    """Show in the card the status and letter of offers changed elsewhere
+    (action bar). offers: StoredOffer as now in the database.
+
+    Set, not dropped: a dropped widget value would come back from the
+    browser, and be saved again over the change.
+    """
+    for stored in offers:
+        values = {
+            "status": to_widget_code(stored.status),
+            "letter": to_widget_code(stored.letter_status),
+        }
+        for name, value in values.items():
+            key = field_key(settings, stored.id, name)
+            if key in st.session_state:
+                st.session_state[key] = value
 
 
 def field_key(settings, offer_id, name):

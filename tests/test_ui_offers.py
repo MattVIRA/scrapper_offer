@@ -16,7 +16,7 @@ from offers import browsing
 from offers.__main__ import UI_APP
 from offers.sources.base import FoundOffer
 from offers.storage.database import connect, list_offers, save_source_result, set_status
-from offers.ui import labels, offer_table
+from offers.ui import labels, offer_card, offer_table
 from offers.ui.offer_table import PageSettings, make_filter, read_selection, table_frame
 from tests.factories import make_offer, make_stored
 
@@ -114,6 +114,17 @@ def test_filters_change_the_table(at):
     assert metrics(at)["Offres"] == "1"
 
 
+def test_search_by_reference_finds_an_offline_offer(at):
+    # VIE4 is offline, hidden by the default filter.
+    at.text_input(key="offers_text").set_value("vie4").run()
+    assert list(table(at)["Titre"]) == ["Poste 4"]
+
+
+def test_search_bar_is_above_the_list(at):
+    assert "offers_text" not in [w.key for w in at.sidebar.text_input]
+    assert at.text_input(key="offers_text").placeholder == offer_table.SEARCH_PLACEHOLDER
+
+
 def test_no_offer_left(at):
     at.text_input(key="offers_text").set_value("introuvable").run()
     assert not at.dataframe
@@ -126,7 +137,6 @@ def test_status_saved_in_the_database_is_shown(at, db_path, ids):
     conn.close()
 
     at.run()
-    assert table(at)[offer_table.STATUS][0] == "Postulé"
     assert metrics(at)["Postulées"] == "1"
 
 
@@ -149,7 +159,7 @@ def test_group_status_only_changes_the_checked_offers(at, db_path, ids):
     # Everything is unchecked after an action.
     assert at.session_state[SELECTED] == set()
     # The boxes of the table are unchecked too.
-    assert at.session_state[at.session_state["offers_table_key"]]["selection"]["rows"] == []
+    assert at.session_state["offers_table"]["selection"]["rows"] == []
 
 
 def test_group_letter_and_favorite(at, db_path, ids):
@@ -162,7 +172,6 @@ def test_group_letter_and_favorite(at, db_path, ids):
 
     second = by_reference(db_path)["VIE2"]
     assert (second.letter_status, second.favorite) == ("to_write", True)
-    assert table(at)["Favori"][1] == offer_table.FAVORITE_MARK
     assert metrics(at)["Lettres à rédiger"] == "1"
 
 
@@ -180,6 +189,72 @@ def test_actions_need_a_checked_offer(at):
     assert button(at, "Corbeille").disabled
     assert at.menu_button(key="offers_status_menu").disabled
     assert not button(at, "Tout marquer comme lu").disabled
+
+
+def test_actions_apply_to_the_open_line_when_nothing_is_checked(at, db_path, ids):
+    at.session_state["offers_card"] = ids["VIE2"]
+    at.run()
+    assert "Ligne ouverte" in [c.value for c in at.caption]
+    assert not at.menu_button(key="offers_status_menu").disabled
+
+    at.menu_button(key="offers_status_menu").click("interesting").run()
+
+    stored = by_reference(db_path)
+    assert {r: s.status for r, s in stored.items()} == {
+        "VIE1": None,
+        "VIE2": "interesting",
+        "VIE3": None,
+        "VIE4": None,
+    }
+    # The card stays open.
+    assert at.session_state["offers_card"] == ids["VIE2"]
+
+
+def test_checked_offers_win_over_the_open_line(at, db_path, ids):
+    at.session_state["offers_card"] = ids["VIE2"]
+    at.session_state[SELECTED] = {ids["VIE1"]}
+    at.run()
+    assert "1 cochées" in [c.value for c in at.caption]
+    button(at, "Favori").click().run()
+
+    stored = by_reference(db_path)
+    assert stored["VIE1"].favorite and not stored["VIE2"].favorite
+
+
+def test_trash_of_the_open_line_opens_the_next_offer(at, db_path, ids):
+    at.session_state["offers_card"] = ids["VIE2"]
+    at.run()
+    button(at, "Corbeille").click().run()
+
+    assert by_reference(db_path)["VIE2"].hidden
+    assert at.session_state["offers_card"] == ids["VIE3"]
+
+
+@pytest.mark.parametrize(
+    "checked, open_id, expected",
+    [
+        ({30, 10}, 20, [10, 30]),
+        (set(), 20, [20]),
+        (set(), 99, []),  # open offer hidden by a filter
+        (set(), None, []),
+        ({99}, 20, [20]),  # checked offer hidden by a filter
+    ],
+)
+def test_action_targets(checked, open_id, expected):
+    assert offer_table.action_targets(checked, open_id, [10, 20, 30]) == expected
+
+
+@pytest.mark.parametrize(
+    "targets, open_id, expected",
+    [
+        ([20], 20, 30),  # the open offer leaves: the next one
+        ([30], 30, 20),  # the last one: the one above
+        ([10], 20, 20),  # the open offer stays
+        ([10, 20, 30], None, None),
+    ],
+)
+def test_next_card(targets, open_id, expected):
+    assert offer_table.next_card(targets, open_id, [10, 20, 30]) == expected
 
 
 def test_trash_then_undo(at, db_path, ids):
@@ -229,32 +304,21 @@ def test_table_frame():
     )
     second = make_stored(2, online=False)
 
-    frame = table_frame([first, second], {1: ["REF7", "REF8"]})
+    frame = table_frame([first, second])
 
-    # Read-only lines: no marker, box nor button column; the status as a label.
+    # Read-only lines: the rest (status, favorite, online, reference) is
+    # in the card and in the color of the line.
     assert list(frame.columns) == offer_table.COLUMNS
-    assert "Repère" not in frame.columns
-    assert frame.to_dict("records")[0] | {"Publiée le": None} == {
-        offer_table.UNREAD: False,
-        offer_table.DUPLICATE: "REF7, REF8",
+    assert frame.to_dict("records")[0] == {
         "Score": 3,
         "Titre": "Data Analyst",
         "Entreprise": "ACME",
         "Source": "test",
-        "Pays": "FRANCE",
         "Ville": "PARIS",
-        "Durée": 12,
-        "Publiée le": None,
         "Ajoutée le": date(2026, 10, 20),
-        offer_table.STATUS: "Refusé",
         "Lettre": "Rédigée",
-        "Favori": offer_table.FAVORITE_MARK,
-        "En ligne": True,
     }
-    row = frame.to_dict("records")[1]
-    assert row[offer_table.UNREAD] and pd.isna(row[offer_table.STATUS])
-    assert row["En ligne"] is False
-    assert row[offer_table.DUPLICATE] == "" and row["Favori"] == ""
+    assert pd.isna(frame.to_dict("records")[1]["Lettre"])
 
 
 def test_table_markers():
@@ -272,7 +336,8 @@ def test_table_markers():
     [
         ({"status": "rejected"}, "#FDE2E1"),
         ({"status": "applied"}, "#DBEAFE"),
-        ({"favorite": True}, "#FEF3C7"),
+        ({"status": "interesting"}, "#DCFCE7"),
+        ({"favorite": True}, offer_card.FAVORITE_COLOR),
         ({"online": False}, "#E5E7EB"),
         ({"status": "not_for_me"}, "#FFEDD5"),
         ({"status": "rejected", "favorite": True}, "#FDE2E1"),
@@ -280,22 +345,27 @@ def test_table_markers():
 )
 def test_whole_line_takes_the_color_of_its_marker(changes, color):
     shown = [make_stored(1, **changes)]
-    frame = table_frame(shown, {})
-    styles = offer_table.row_styles(frame.iloc[0], offer_table.table_markers(shown))
+    frame = table_frame(shown)
+    styles = offer_table.row_styles(frame.iloc[0], offer_table.table_markers(shown), [False])
     assert len(styles) == len(offer_table.COLUMNS)
     assert all(f"background-color: {color}" in style for style in styles)
 
 
+def test_every_marker_has_its_color():
+    markers = {*browsing.STATUS_MARKERS.values(), browsing.MARKER_FAVORITE, browsing.MARKER_OFFLINE}
+    assert set(offer_table.ROW_STYLES) == markers
+
+
 def test_open_line_is_highlighted_above_its_color():
     shown = [make_stored(1), make_stored(2, status="rejected")]
-    frame = table_frame(shown, {})
+    frame = table_frame(shown)
     markers = offer_table.table_markers(shown)
     width = len(offer_table.COLUMNS)
+    styles = offer_table.row_styles(frame.iloc[1], markers, [True, True], open_row=1)
+    assert styles == [offer_table.OPEN_ROW_STYLE] * width
     assert (
-        offer_table.row_styles(frame.iloc[1], markers, open_row=1)
-        == [offer_table.OPEN_ROW_STYLE] * width
+        offer_table.row_styles(frame.iloc[0], markers, [False, False], open_row=1) == [""] * width
     )
-    assert offer_table.row_styles(frame.iloc[0], markers, open_row=1) == [""] * width
 
 
 def test_source_column_shows_the_label(at):
@@ -304,8 +374,46 @@ def test_source_column_shows_the_label(at):
 
 def test_line_without_marker_keeps_the_default_color():
     shown = [make_stored(1)]
-    frame = table_frame(shown, {})
-    assert set(offer_table.row_styles(frame.iloc[0], offer_table.table_markers(shown))) == {""}
+    frame = table_frame(shown)
+    styles = offer_table.row_styles(frame.iloc[0], offer_table.table_markers(shown), [False])
+    assert set(styles) == {""}
+
+
+def test_title_of_an_unread_offer_is_bold():
+    shown = [make_stored(1, favorite=True)]
+    frame = table_frame(shown)
+    styles = offer_table.row_styles(frame.iloc[0], offer_table.table_markers(shown), [True])
+    title = offer_table.COLUMNS.index(offer_table.TITLE)
+    assert offer_table.UNREAD_STYLE in styles[title]
+    # The color of the line is kept.
+    assert offer_card.FAVORITE_COLOR in styles[title]
+    others = styles[:title] + styles[title + 1 :]
+    assert not any(offer_table.UNREAD_STYLE in style for style in others)
+
+
+@pytest.mark.parametrize(
+    "cell, clicked, expected",
+    [
+        ((2, "Titre"), None, True),
+        ((2, "Titre"), (1, "Titre"), True),
+        ((2, "Titre"), (2, "Titre"), False),  # sent again with a checked box
+        (None, (2, "Titre"), False),
+    ],
+)
+def test_is_new_click(cell, clicked, expected):
+    assert offer_table.is_new_click(cell, clicked) == expected
+
+
+def test_clicked_cell_is_cleared_once_its_card_is_closed(at, ids):
+    at.session_state["offers_card"] = ids["VIE2"]
+    at.session_state["offers_clicked"] = (1, "Titre")
+    at.run()
+    assert at.session_state["offers_clicked"] == (1, "Titre")
+
+    at.button(key="offers_card_close").click().run()
+    # Cleared, so that a new click on it opens the card again.
+    assert at.session_state["offers_clicked"] is None
+    assert at.session_state["offers_table"]["selection"]["cells"] == []
 
 
 def test_read_selection():
@@ -316,11 +424,30 @@ def test_read_selection():
     assert read_selection(rows, [], []) == (set(), None)
 
 
-def test_table_key_changes_with_the_lines():
-    first = offer_table.table_key(PAGE, [1, 2, 3])
-    assert first == offer_table.table_key(PAGE, [1, 2, 3])
-    assert first != offer_table.table_key(PAGE, [1, 3])
-    assert first.startswith("offers_table_")
+def test_checked_rows():
+    assert offer_table.checked_rows([30, 10, 20], {20, 30, 99}) == [0, 2]
+
+
+def test_checked_boxes_follow_their_offers_when_the_lines_change(at, ids):
+    # Checked in the third line.
+    at.session_state[SELECTED] = {ids["VIE3"]}
+    # VIE3 is now the first line.
+    at.text_input(key="offers_text").set_value("poste 3").run()
+    assert at.session_state["offers_table"]["selection"]["rows"] == [0]
+
+
+def test_action_bar_updates_the_follow_up_of_the_card(at, db_path, ids):
+    at.session_state["offers_card"] = ids["VIE2"]
+    at.run()
+    at.menu_button(key="offers_status_menu").click("not_for_me").run()
+    assert at.selectbox(key=f"offers_card_{ids['VIE2']}_status").value == "not_for_me"
+    # The old value of the field is not saved back on the next run.
+    at.run()
+    assert by_reference(db_path)["VIE2"].status == "not_for_me"
+
+
+def test_hint_without_card(at):
+    assert offer_table.NO_CARD_HINT in [c.value for c in at.caption]
 
 
 def test_make_filter_without_choice_filters_nothing():

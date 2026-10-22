@@ -299,8 +299,10 @@ def save_tracking_details(conn, offer_id, applied_on, notes, now):
     )
 
 
-def save_follow_up(conn, offer_id, status, letter_status, favorite, applied_on, notes, now):
-    """Write the whole follow-up of an offer at once, as entered in its card.
+def save_follow_up(conn, offer_id, status, letter_status, applied_on, notes, now):
+    """Write the follow-up of an offer at once, as entered in its card.
+
+    The favorite has its own button in the card (set_favorite).
 
     applied_on: date, text (kept from the old Excel file) or None. Empty
     notes are stored as None.
@@ -310,7 +312,6 @@ def save_follow_up(conn, offer_id, status, letter_status, favorite, applied_on, 
     fields = {
         "status": status,
         "letter_status": letter_status,
-        "favorite": int(favorite),
         "applied_on": to_text(applied_on),
         "notes": notes or None,
     }

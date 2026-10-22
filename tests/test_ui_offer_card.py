@@ -13,7 +13,7 @@ from streamlit.testing.v1 import AppTest
 from offers.__main__ import UI_APP
 from offers.sources.base import FoundOffer
 from offers.storage.database import connect, hide, save_source_result, save_tracking_details
-from offers.ui import offer_card, offer_table
+from offers.ui import offer_card
 from offers.ui.offer_table import PageSettings
 from tests.factories import make_stored
 from tests.test_ui_offers import TIMEOUT, button, by_reference, metrics, offer, table
@@ -90,7 +90,6 @@ def test_opening_the_card_marks_the_offer_as_read(start, db_path, ids):
     assert by_reference(db_path)["VIE1"].read_at is not None
     assert by_reference(db_path)["VIE2"].read_at is None
     assert metrics(at)["Non lues"] == "2"
-    assert list(table(at)[offer_table.UNREAD]) == [False, True, True]
 
 
 def test_card_of_an_unknown_offer_is_closed(start):
@@ -102,32 +101,28 @@ def test_card_of_an_unknown_offer_is_closed(start):
 # --- Follow-up ----------------------------------------------------------------
 
 
-def test_follow_up_is_saved_by_the_form(start, db_path, ids):
+def test_each_change_of_the_follow_up_is_saved(start, db_path, ids):
     at = start(ids["VIE1"])
-    at.selectbox(key=field(ids, "VIE1", "status")).select("applied")
-    at.selectbox(key=field(ids, "VIE1", "letter")).select("written")
-    at.checkbox(key=field(ids, "VIE1", "favorite")).check()
-    at.date_input(key=field(ids, "VIE1", "applied_on")).set_value(date(2026, 10, 21))
-    at.text_area(key=field(ids, "VIE1", "notes")).set_value("Relancer lundi")
-    button(at, "Enregistrer").click().run()
+    at.selectbox(key=field(ids, "VIE1", "status")).select("applied").run()
 
-    first = by_reference(db_path)["VIE1"]
-    assert (first.status, first.letter_status, first.favorite) == ("applied", "written", True)
-    assert (first.applied_on, first.notes) == ("2026-10-21", "Relancer lundi")
+    assert by_reference(db_path)["VIE1"].status == "applied"
     # The card stays open beside the list, which shows the change.
     assert at.session_state[CARD] == ids["VIE1"]
-    assert "Suivi enregistré." in texts(at.success)
-    assert table(at)[offer_table.STATUS][0] == "Postulé"
+    assert "Suivi enregistré." in texts(at.toast)
 
-
-def test_nothing_is_written_before_saving(start, db_path, ids):
-    at = start(ids["VIE1"])
-    at.selectbox(key=field(ids, "VIE1", "status")).select("applied")
-    at.text_area(key=field(ids, "VIE1", "notes")).set_value("Brouillon")
-    at.button(key="offers_card_action").click().run()
+    at.selectbox(key=field(ids, "VIE1", "letter")).select("written").run()
+    at.date_input(key=field(ids, "VIE1", "applied_on")).set_value(date(2026, 10, 21)).run()
+    at.text_area(key=field(ids, "VIE1", "notes")).set_value("Relancer lundi").run()
 
     first = by_reference(db_path)["VIE1"]
-    assert (first.status, first.notes) == (None, None)
+    assert (first.status, first.letter_status) == ("applied", "written")
+    assert (first.applied_on, first.notes) == ("2026-10-21", "Relancer lundi")
+
+
+def test_no_save_button_nor_favorite_in_the_follow_up(start, ids):
+    at = start(ids["VIE1"])
+    assert not [b for b in at.button if b.label == "Enregistrer"]
+    assert not at.checkbox
 
 
 def test_form_shows_the_current_follow_up(start, db_path, ids):
@@ -181,6 +176,7 @@ def test_following_offer(navigation, expected):
 def test_details():
     stored = make_stored(last_seen=datetime(2026, 10, 22, 8, 0), online=False, search_name=None)
     assert offer_card.details(stored) == {
+        "Réf.": "REF1",
         "Pays et ville": "PARIS, FRANCE",
         "Durée": "12 mois",
         "Type de contrat": "VIE",
@@ -284,13 +280,17 @@ def test_close_button(start, ids):
 
 def test_favorite_button_writes_at_once(start, db_path, ids):
     at = start(ids["VIE1"])
-    assert at.button(key="offers_card_favorite").label == "Ajouter aux favoris"
+    favorite_style = offer_card.favorite_style("offers_card_favorite")
+    assert at.button(key="offers_card_favorite").label == "Favori"
+    assert favorite_style not in texts(at.get("html"))
 
     at.button(key="offers_card_favorite").click().run()
 
     assert by_reference(db_path)["VIE1"].favorite
-    assert at.button(key="offers_card_favorite").label == "Retirer des favoris"
-    assert table(at)["Favori"][0] == offer_table.FAVORITE_MARK
+    assert at.button(key="offers_card_favorite").label == "Favori"
+    # Yellow, as the line of a favorite in the list.
+    assert favorite_style in texts(at.get("html"))
+    assert offer_card.FAVORITE_COLOR in favorite_style
 
     at.button(key="offers_card_favorite").click().run()
     assert not by_reference(db_path)["VIE1"].favorite

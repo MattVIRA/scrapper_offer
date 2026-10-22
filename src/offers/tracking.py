@@ -6,6 +6,7 @@ the evaluations table. The letter is a separate field, not a status.
 
 # Code stored in the database -> label shown to the user, in display order.
 STATUSES = {
+    "interesting": "Intéressant",
     "applied": "Postulé",
     "rejected": "Refusé",
     "not_for_me": "Pas pour moi",

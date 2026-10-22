@@ -5,7 +5,6 @@ table. The checked offers live in the session state, not in the table:
 the table only shows them, so the page always knows what is checked.
 """
 
-import zlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -44,37 +43,39 @@ ONLINE_LABELS = {
     browsing.OFFLINE: "Hors ligne",
     browsing.ALL: "Toutes",
 }
-FAVORITE_MARK = "★"
 TRASH_ICON = ":material/delete:"
 RESTORE_ICON = ":material/restore_from_trash:"
 DATE_FORMAT = "DD/MM/YYYY"
+SEARCH_PLACEHOLDER = "Titre, entreprise, ville, pays ou réf. (VIE243542)"
+# Pause in the typing before the list is filtered.
+SEARCH_DELAY = "300ms"
 
-# Table columns.
-UNREAD = "Non lu"
-DUPLICATE = "Doublon de"
-STATUS = "Statut"
-# fmt: off
-COLUMNS = [
-    UNREAD, DUPLICATE, "Score", "Titre", "Entreprise", "Source", "Pays", "Ville",
-    "Durée", "Publiée le", "Ajoutée le", STATUS, "Lettre", "Favori", "En ligne",
-]
-# fmt: on
+# Table columns: the rest is in the card. The status, favorite and
+# online state are given by the color of the line.
+TITLE = "Titre"
+COLUMNS = ["Score", TITLE, "Entreprise", "Source", "Ville", "Ajoutée le", "Lettre"]
+# Title of an offer never opened.
+UNREAD_STYLE = "font-weight: bold"
 # Background of a whole line, by marker: light colors with dark text, so
 # that the lines stay readable with the dark theme too.
 TEXT_COLOR = "#1F2937"
+# Same yellow as the « Favori » button of the card.
+FAVORITE_COLOR = offer_card.FAVORITE_COLOR
 # fmt: off
 ROW_STYLES = {
-    browsing.MARKER_REJECTED: f"background-color: #FDE2E1; color: {TEXT_COLOR}",
-    browsing.MARKER_APPLIED:    f"background-color: #DBEAFE; color: {TEXT_COLOR}",
-    browsing.MARKER_NOT_FOR_ME: f"background-color: #FFEDD5; color: {TEXT_COLOR}",
-    browsing.MARKER_FAVORITE:   f"background-color: #FEF3C7; color: {TEXT_COLOR}",
-    browsing.MARKER_OFFLINE:    "background-color: #E5E7EB; color: #6B7280",
+    browsing.MARKER_REJECTED:    f"background-color: #FDE2E1; color: {TEXT_COLOR}",
+    browsing.MARKER_APPLIED:     f"background-color: #DBEAFE; color: {TEXT_COLOR}",
+    browsing.MARKER_NOT_FOR_ME:  f"background-color: #FFEDD5; color: {TEXT_COLOR}",
+    browsing.MARKER_INTERESTING: f"background-color: #DCFCE7; color: {TEXT_COLOR}",
+    browsing.MARKER_FAVORITE:    f"background-color: {FAVORITE_COLOR}; color: {TEXT_COLOR}",
+    browsing.MARKER_OFFLINE:     "background-color: #E5E7EB; color: #6B7280",
 }
 # fmt: on
 # The line whose card is open, above the color of its follow-up.
 OPEN_ROW_STYLE = "background-color: #4F46E5; color: #FFFFFF; font-weight: bold"
 # Widths of the list and of the card beside it.
 LIST_AND_CARD = [3, 2]
+NO_CARD_HINT = "Cliquer sur une ligne pour ouvrir sa fiche."
 
 
 @dataclass(frozen=True)
@@ -111,23 +112,26 @@ def show_offer_page(settings):
             offers = list_offers(conn)
         tags = browsing.duplicate_tags(probable_duplicates(conn))
     st.title(page_title(settings, offers))
-    offer_filter = filter_sidebar(offers, settings)
+    text = search_bar(settings)
+    offer_filter = filter_sidebar(offers, settings, text)
     shown = browsing.filter_offers(offers, offer_filter)
     show_counters(shown)
     show_undo(settings)
-    show_actions(settings, shown)
     card = opened_offer(settings, offers)
-    if card is None:
-        show_table(settings, shown, tags)
-        return
+    show_actions(settings, shown, card.id if card else None)
     # The description beside the list, the follow-up under it: the list
-    # stays visible and clickable.
+    # stays visible and clickable. The same columns with or without card,
+    # so that the table is not drawn again from its top on opening one.
     list_column, card_column = st.columns(LIST_AND_CARD, gap="medium")
     with list_column:
-        show_table(settings, shown, tags, open_id=card.id)
-        offer_card.show_follow_up_panel(settings, card, editable=not settings.in_trash)
+        show_table(settings, shown, open_id=card.id if card else None)
+        if card:
+            offer_card.show_follow_up_panel(settings, card, editable=not settings.in_trash)
     with card_column:
-        show_card(settings, card, shown, tags)
+        if card:
+            show_card(settings, card, shown, tags)
+        else:
+            st.caption(NO_CARD_HINT)
 
 
 def page_title(settings, offers):
@@ -194,16 +198,28 @@ def card_action(settings):
 # --- Filters ------------------------------------------------------------------
 
 
-def filter_sidebar(offers, settings):
+def search_bar(settings):
+    """Show the search bar above the list and return the text typed."""
+    return st.text_input(
+        "Rechercher",
+        type="search",
+        placeholder=SEARCH_PLACEHOLDER,
+        live=SEARCH_DELAY,
+        label_visibility="collapsed",
+        key=settings.state_key("text"),
+    )
+
+
+def filter_sidebar(offers, settings, text):
     """Show the filters in the sidebar and return the chosen OfferFilter.
 
-    The filters are not kept from one opening of the app to the next.
+    text: typed in the search bar. The filters are not kept from one
+    opening of the app to the next.
     """
     choices = browsing.filter_choices(offers)
     key = settings.state_key
     with st.sidebar:
         st.header("Filtres")
-        text = st.text_input("Titre ou entreprise", key=key("text"))
         statuses = st.multiselect(
             "Statut",
             STATUS_CHOICES,
@@ -307,17 +323,22 @@ def show_counters(shown):
 # --- Actions ------------------------------------------------------------------
 
 
-def show_actions(settings, shown):
-    """Show the actions on the checked offers, and "Tout marquer comme lu"."""
-    shown_ids = {stored.id for stored in shown}
-    # A checked offer hidden by a filter is not changed.
-    checked = sorted(st.session_state[settings.state_key("selected")] & shown_ids)
-    nothing_checked = not checked
+def show_actions(settings, shown, open_id=None):
+    """Show the actions on the checked offers, and "Tout marquer comme lu".
+
+    With no offer checked, the actions apply to the open one (open_id).
+    """
+    shown_ids = [stored.id for stored in shown]
+    checked = st.session_state[settings.state_key("selected")]
+    targets = action_targets(checked, open_id, shown_ids)
+    nothing_checked = not targets
+    # Once the open offer leaves the list, the card goes to the next one.
+    leaving = {"move_card": True, "next_card": next_card(targets, open_id, shown_ids)}
     key = settings.state_key
     with st.container(horizontal=True, vertical_alignment="center"):
-        st.caption(f"{len(checked)} cochées")
+        st.caption(targets_caption(checked & set(shown_ids), targets))
         if settings.in_trash:
-            action_button(settings, "Restaurer", RESTORE_ICON, checked, restore)
+            action_button(settings, "Restaurer", RESTORE_ICON, targets, restore, **leaving)
             return
         st.menu_button(
             "Statut",
@@ -327,7 +348,7 @@ def show_actions(settings, shown):
             disabled=nothing_checked,
             key=key("status_menu"),
             on_click=act_from_menu,
-            args=(settings, key("status_menu"), checked, write_status),
+            args=(settings, key("status_menu"), targets, write_status),
         )
         st.menu_button(
             "Lettre",
@@ -337,13 +358,13 @@ def show_actions(settings, shown):
             disabled=nothing_checked,
             key=key("letter_menu"),
             on_click=act_from_menu,
-            args=(settings, key("letter_menu"), checked, write_letter_status),
+            args=(settings, key("letter_menu"), targets, write_letter_status),
         )
-        action_button(settings, "Favori", ":material/star:", checked, add_favorite)
-        action_button(settings, "Retirer des favoris", ":material/star_border:", checked,
+        action_button(settings, "Favori", ":material/star:", targets, add_favorite)
+        action_button(settings, "Retirer des favoris", ":material/star_border:", targets,
                       remove_favorite)  # fmt: skip
-        action_button(settings, "Marquer comme lu", ":material/done:", checked, mark_read)
-        action_button(settings, "Corbeille", TRASH_ICON, checked, hide, trashed=True)
+        action_button(settings, "Marquer comme lu", ":material/done:", targets, mark_read)
+        action_button(settings, "Corbeille", TRASH_ICON, targets, hide, trashed=True, **leaving)
         st.button(
             "Tout marquer comme lu",
             icon=":material/done_all:",
@@ -354,16 +375,48 @@ def show_actions(settings, shown):
         )
 
 
-def action_button(settings, label, icon, checked, write, trashed=False):
-    """Button that applies write(conn, ids, now) to the checked offers."""
+def action_targets(checked, open_id, shown_ids):
+    """Return the ids of the offers the actions apply to, sorted.
+
+    The checked offers shown (a checked offer hidden by a filter is not
+    changed); with none checked, the open offer if shown.
+    """
+    targets = sorted(set(checked) & set(shown_ids))
+    if not targets and open_id in shown_ids:
+        return [open_id]
+    return targets
+
+
+def targets_caption(checked_shown, targets):
+    """Return the text before the actions: what they apply to."""
+    if targets and not checked_shown:
+        return "Ligne ouverte"
+    return f"{len(checked_shown)} cochées"
+
+
+def next_card(targets, open_id, shown_ids):
+    """Return the offer to open if the open one leaves the list by an action.
+
+    open_id when it is not among the targets; None closes the card.
+    """
+    if open_id not in targets:
+        return open_id
+    return offer_card.following_offer(offer_card.navigation(shown_ids, open_id))
+
+
+def action_button(settings, label, icon, targets, write, **options):
+    """Button that applies write(conn, ids, now) to the target offers.
+
+    options: those of act.
+    """
     st.button(
         label,
         icon=icon,
-        disabled=not checked,
+        disabled=not targets,
         key=settings.state_key(label),
         on_click=act,
-        args=(settings, write, checked),
-        kwargs={"trashed": trashed},
+        args=(settings, write, targets),
+        kwargs=options,
     )
 
 
@@ -389,20 +442,39 @@ def act_from_menu(settings, menu_key, offer_ids, write):
     act(settings, lambda conn, ids, now: write(conn, ids, option, now), offer_ids)
 
 
-def act(settings, write: Callable, offer_ids, trashed=False):
-    """Write an action, uncheck everything, and keep the trash to undo it."""
+def act(settings, write: Callable, offer_ids, trashed=False, move_card=False, next_card=None):
+    """Write an action, uncheck everything, and keep the trash to undo it.
+
+    move_card: the offers leave the list; the card then shows next_card,
+    or closes if None.
+    """
     with open_database(st.session_state.db_path) as conn:
         write(conn, offer_ids, datetime.now())
+        changed = [stored for stored in list_offers(conn) if stored.id in offer_ids]
+    # The follow-up fields of the card show the new values.
+    offer_card.refresh_fields(settings, changed)
     st.session_state[settings.state_key("selected")] = set()
     st.session_state[settings.state_key("trashed")] = list(offer_ids) if trashed else None
     uncheck_table(settings)
+    if move_card and next_card is None:
+        offer_card.close_card(settings)
+    elif move_card:
+        offer_card.open_card(settings, next_card)
 
 
 def uncheck_table(settings):
     """Uncheck the boxes of the table shown, to match the empty selection."""
-    key = st.session_state.get(settings.state_key("table_key"))
-    if key is not None:
-        st.session_state[key] = {"selection": {"rows": [], "cells": []}}
+    reset_table(settings, [])
+
+
+def reset_table(settings, rows):
+    """Set the selection of the table: rows checked, no cell clicked.
+
+    The browser ignores a selection equal to the last one sent, so the
+    clicked cell is kept between clicks, and only cleared when needed.
+    """
+    st.session_state[table_key(settings)] = {"selection": {"rows": rows, "cells": []}}
+    st.session_state[settings.state_key("clicked")] = None
 
 
 def show_undo(settings):
@@ -424,8 +496,9 @@ def show_undo(settings):
 # --- Table --------------------------------------------------------------------
 
 
-def show_table(settings, shown, tags, open_id=None):
-    """Show the offers as read-only lines, colored by their follow-up.
+def show_table(settings, shown, open_id=None):
+    """Show the offers as read-only lines, colored by their follow-up, the
+    titles of the unread ones in bold.
 
     The boxes on the left check offers for the actions; a click on a cell
     opens the card of its line. open_id: offer whose card is open, its
@@ -435,48 +508,53 @@ def show_table(settings, shown, tags, open_id=None):
         st.info("Aucune offre ne correspond aux filtres.", icon=":material/filter_alt_off:")
         return
     row_ids = [stored.id for stored in shown]
+    key = table_key(settings)
+    checked = st.session_state[settings.state_key("selected")]
+    previous_ids = st.session_state.get(settings.state_key("rows"))
+    clicked = st.session_state.get(settings.state_key("clicked"))
+    # The table selects rows by their number: after a change of the lines,
+    # the same numbers would point to other offers. A cell clicked on
+    # another line than the open one (card closed, arrows) is cleared, so
+    # that it can open its offer again.
+    if (
+        key not in st.session_state
+        or previous_ids != row_ids
+        or (clicked is not None and row_ids[clicked[0]] != open_id)
+    ):
+        reset_table(settings, checked_rows(row_ids, checked))
     # The callback finds the offers from the row numbers.
     st.session_state[settings.state_key("rows")] = row_ids
-    key = table_key(settings, row_ids)
-    st.session_state[settings.state_key("table_key")] = key
-    frame = table_frame(shown, tags)
-    checked = st.session_state[settings.state_key("selected")]
+    frame = table_frame(shown)
     open_row = row_ids.index(open_id) if open_id in row_ids else None
     markers = table_markers(shown, on_favorites_page=settings.favorites_only)
+    unread = [browsing.is_unread(stored) for stored in shown]
     st.dataframe(
-        frame.style.apply(row_styles, axis=1, markers=markers, open_row=open_row),
+        frame.style.apply(row_styles, axis=1, markers=markers, unread=unread, open_row=open_row),
         key=key,
         # st.dataframe takes no args for its callback.
         on_select=partial(on_table_select, settings, key),
         selection_mode=["multi-row", "single-cell"],
-        selection_default={
-            "selection": {"rows": [n for n, i in enumerate(row_ids) if i in checked]}
-        },
         hide_index=True,
         column_config=column_config(),
         alt="Offres filtrées, avec leur suivi",
     )
 
 
-def table_key(settings, row_ids):
-    """Key of the table: a new table, with the checked boxes, when the lines change.
+def table_key(settings):
+    """Key of the table: always the same, so that it keeps its scroll position."""
+    return settings.state_key("table")
 
-    The table selects rows by their number: after a filter, the same
-    numbers would point to other offers.
-    """
-    return settings.state_key(f"table_{zlib.crc32(repr(row_ids).encode())}")
+
+def checked_rows(row_ids, checked):
+    """Return the numbers of the rows whose offer is checked."""
+    return [number for number, offer_id in enumerate(row_ids) if offer_id in checked]
 
 
 def column_config():
     return {
-        UNREAD: st.column_config.CheckboxColumn(UNREAD, width="small"),
-        DUPLICATE: st.column_config.TextColumn(DUPLICATE, help="Doublons probables"),
         "Score": st.column_config.NumberColumn("Score", width="small"),
-        "Titre": st.column_config.TextColumn("Titre", width="large", pinned=True),
-        "Publiée le": st.column_config.DateColumn("Publiée le", format=DATE_FORMAT),
+        TITLE: st.column_config.TextColumn(TITLE, width="large", pinned=True),
         "Ajoutée le": st.column_config.DateColumn("Ajoutée le", format=DATE_FORMAT),
-        "Favori": st.column_config.TextColumn("Favori", width="small"),
-        "En ligne": st.column_config.CheckboxColumn("En ligne", width="small"),
     }
 
 
@@ -485,45 +563,38 @@ def table_markers(shown, on_favorites_page=False):
     return [browsing.marker(stored, on_favorites_page) for stored in shown]
 
 
-def table_frame(shown, tags):
-    """Return the table of the offers shown, one row per offer, in their order.
-
-    tags: {offer id: references of its probable duplicates}.
-    """
-    rows = [table_row(stored, tags) for stored in shown]
-    return pd.DataFrame(rows, columns=COLUMNS)
+def table_frame(shown):
+    """Return the table of the offers shown, one row per offer, in their order."""
+    return pd.DataFrame([table_row(stored) for stored in shown], columns=COLUMNS)
 
 
-def table_row(stored, tags):
+def table_row(stored):
     offer = stored.offer
     return {
-        UNREAD: browsing.is_unread(stored),
-        DUPLICATE: ", ".join(tags.get(stored.id, [])),
         "Score": stored.score,
-        "Titre": offer.title,
+        TITLE: offer.title,
         "Entreprise": offer.company,
         "Source": source_label(offer.source),
-        "Pays": offer.country,
         "Ville": offer.city,
-        "Durée": offer.duration_months,
-        "Publiée le": offer.published_on,
         "Ajoutée le": stored.first_seen.date(),
-        STATUS: status_label(stored.status) if stored.status else None,
         "Lettre": letter_label(stored.letter_status) if stored.letter_status else None,
-        "Favori": FAVORITE_MARK if stored.favorite else "",
-        "En ligne": stored.online,
     }
 
 
-def row_styles(row, markers, open_row=None):
-    """Return the CSS of each cell of a table row: the color of its marker.
+def row_styles(row, markers, unread, open_row=None):
+    """Return the CSS of each cell of a table row: the color of its marker,
+    and the title in bold if unread.
 
-    markers: marker of each row (table_markers); row.name is its number.
+    markers, unread: marker and unread state of each row; row.name is its number.
     open_row: number of the row whose card is open, highlighted instead.
     """
     if row.name == open_row:
         return [OPEN_ROW_STYLE] * len(row)
-    return [ROW_STYLES.get(markers[row.name], "")] * len(row)
+    styles = [ROW_STYLES.get(markers[row.name], "")] * len(row)
+    if unread[row.name]:
+        title = COLUMNS.index(TITLE)
+        styles[title] = "; ".join(part for part in (styles[title], UNREAD_STYLE) if part)
+    return styles
 
 
 def on_table_select(settings, key):
@@ -532,10 +603,19 @@ def on_table_select(settings, key):
     row_ids = st.session_state[settings.state_key("rows")]
     checked, opened = read_selection(row_ids, selection.rows, selection.cells)
     st.session_state[settings.state_key("selected")] = checked
-    if opened is not None:
+    cell = tuple(selection.cells[0]) if selection.cells else None
+    if is_new_click(cell, st.session_state.get(settings.state_key("clicked"))):
         offer_card.open_card(settings, opened)
-        # Unselect the cell, so that the same offer can be opened again.
-        st.session_state[key] = {"selection": {"rows": list(selection.rows), "cells": []}}
+    st.session_state[settings.state_key("clicked")] = cell
+
+
+def is_new_click(cell, clicked):
+    """Tell whether cell (row number, column) was just clicked.
+
+    clicked: the cell already selected. It stays selected after its click,
+    and a change of the checked boxes sends it again.
+    """
+    return cell is not None and cell != clicked
 
 
 def read_selection(row_ids, rows, cells):

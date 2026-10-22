@@ -15,6 +15,7 @@ from offers.storage.database import (
     list_offers,
     save_follow_up,
     save_source_result,
+    set_favorite,
 )
 from offers.ui import offer_card
 from offers.ui.offer_table import PageSettings
@@ -36,10 +37,10 @@ def db_path(tmp_path):
     found = [FoundOffer(o, "A") for o in offers]
     save_source_result(conn, "business_france", found, offers[:2], lambda o: (1, "data"), NOW)
     ids = {s.offer.reference: s.id for s in list_offers(conn)}
-    save_follow_up(conn, ids["VIE1"], "rejected", "to_write", True, date(2026, 10, 21),
-                   "Relancer", NOW)  # fmt: skip
-    save_follow_up(conn, ids["VIE2"], "applied", None, True, None, None, NOW)
-    save_follow_up(conn, ids["VIE3"], "not_for_me", None, False, None, None, NOW)
+    save_follow_up(conn, ids["VIE1"], "rejected", "to_write", date(2026, 10, 21), "Relancer", NOW)
+    save_follow_up(conn, ids["VIE2"], "applied", None, None, None, NOW)
+    save_follow_up(conn, ids["VIE3"], "not_for_me", None, None, None, NOW)
+    set_favorite(conn, [ids["VIE1"], ids["VIE2"]], True, NOW)
     conn.close()
     return path
 
