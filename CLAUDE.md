@@ -10,7 +10,8 @@ Code dans `src/offers/` : `sources/` (une classe par source, contrat
 dans `sources/base.py`), `storage/` (`database.py`, seul module qui parle
 à SQLite, `schema.sql`, `excel_import.py`), `scoring/`, `exports/`,
 `tracking.py` (statuts de suivi), `pipeline.py` (orchestrateur),
-`__main__.py` (ligne de commande).
+`ui/` (interface Streamlit : `app.py`, une page par script de
+`app_pages/`), `__main__.py` (ligne de commande).
 
 ## Commandes
 
@@ -20,13 +21,21 @@ python -m offers collect        # interroge les sites, met à jour la base puis 
 python -m offers import-excel   # une seule fois : offres et suivi de l'Excel vers la base
 python -m offers export         # met à jour l'Excel à partir de la base, sans réseau
 python -m offers duplicates     # affiche les doublons probables
+offers ui                       # ouvre l'interface sur http://localhost:8501 (Ctrl+C pour l'arrêter)
 pytest                          # tests, sans réseau
 ruff check .                    # vérifier le code
 ruff format .                   # mettre en forme (ruff format --check . pour vérifier)
 ```
 
 Options : `--db` (défaut `data/offers.db`) et `--excel` (défaut
-`output/offres_vie.xlsx`) ; `collect` prend aussi `--config`.
+`output/offres_vie.xlsx`) ; `collect` et `ui` prennent aussi `--config`.
+
+`offers ui` (ou `python -m offers ui`) marche dans le `.venv` activé.
+Pour la lancer sans l'activer, alias facultatif dans `~/.zshrc` :
+`alias offers="$HOME/Documents/CODE/scrapper_offer/.venv/bin/offers"`.
+L'interface n'écoute que sur `localhost` (option passée par `offers ui`
+et `.streamlit/config.toml`) ; elle se teste avec `AppTest`, sans
+navigateur (`tests/test_ui_app.py`).
 
 `collect`, `import-excel` et `export` modifient la base ou l'Excel de
 l'utilisateur (et `collect` appelle les vrais sites) : ne pas les lancer

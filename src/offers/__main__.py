@@ -1,6 +1,7 @@
-"""Command line: python -m offers collect | import-excel | export | duplicates."""
+"""Command line: python -m offers collect | import-excel | export | duplicates | ui."""
 
 import argparse
+import subprocess
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -23,6 +24,9 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = ROOT / "config.yaml"
 DEFAULT_EXCEL = ROOT / "output" / "offres_vie.xlsx"
 DEFAULT_DB = ROOT / "data" / "offers.db"
+UI_APP = Path(__file__).resolve().parent / "ui" / "app.py"
+# The interface never listens on the local network.
+STREAMLIT_OPTIONS = ["--server.address=localhost", "--browser.gatherUsageStats=false"]
 
 
 def build_parser():
@@ -34,12 +38,7 @@ def build_parser():
         help="récupère les offres et met à jour l'Excel",
         description="Interroge les sources activées dans config.yaml et met à jour l'Excel.",
     )
-    collect.add_argument(
-        "--config",
-        type=Path,
-        default=DEFAULT_CONFIG,
-        help=f"fichier de réglages (défaut : {DEFAULT_CONFIG})",
-    )
+    add_config_option(collect)
     add_excel_option(collect)
     add_db_option(collect)
     import_excel = commands.add_parser(
@@ -62,7 +61,23 @@ def build_parser():
         description="Affiche les offres en ligne de même entreprise et de même titre.",
     )
     add_db_option(duplicates)
+    ui = commands.add_parser(
+        "ui",
+        help="ouvre l'interface dans le navigateur",
+        description="Ouvre l'interface sur http://localhost:8501, visible seulement depuis ce Mac.",
+    )
+    add_db_option(ui)
+    add_config_option(ui)
     return parser
+
+
+def add_config_option(parser):
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG,
+        help=f"fichier de réglages (défaut : {DEFAULT_CONFIG})",
+    )
 
 
 def add_excel_option(parser):
@@ -208,11 +223,42 @@ def open_existing_database(path):
     return connect(path)
 
 
+def ui(args):
+    """Run the Streamlit interface until Ctrl+C."""
+    if not args.db.exists():
+        raise OffersError(f"Base introuvable : {args.db}. Lance d'abord python -m offers collect.")
+    print("Ouverture de l'interface dans le navigateur. Ctrl+C pour l'arrêter.")
+    try:
+        subprocess.run(streamlit_command(args.db, args.config), check=False)
+    except KeyboardInterrupt:
+        # Streamlit receives the Ctrl+C too and stops on its own.
+        pass
+    print("Interface arrêtée.")
+
+
+def streamlit_command(db_path, config_path):
+    """Return the command that runs the interface on db_path and config_path."""
+    return [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        str(UI_APP),
+        *STREAMLIT_OPTIONS,
+        "--",
+        "--db",
+        str(db_path),
+        "--config",
+        str(config_path),
+    ]
+
+
 COMMANDS = {
     "collect": collect,
     "import-excel": import_excel,
     "export": export,
     "duplicates": duplicates,
+    "ui": ui,
 }
 
 

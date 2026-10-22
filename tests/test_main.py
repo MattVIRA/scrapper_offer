@@ -173,6 +173,69 @@ def test_export(capsys, tmp_path, business_france_search):
     assert other.exists()
 
 
+class FakeRun:
+    """Stands for subprocess.run: keeps the command instead of running it."""
+
+    def __init__(self, error=None):
+        self.commands = []
+        self.error = error
+
+    def __call__(self, command, check):
+        self.commands.append(command)
+        if self.error:
+            raise self.error
+
+
+def test_ui_runs_streamlit_on_localhost(monkeypatch, capsys, tmp_path):
+    db = tmp_path / "offers.db"
+    db.touch()
+    config = tmp_path / "config.yaml"
+    run = FakeRun()
+    monkeypatch.setattr(cli.subprocess, "run", run)
+
+    assert cli.main(["ui", "--db", str(db), "--config", str(config)]) == 0
+    assert run.commands == [
+        [
+            cli.sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            str(cli.UI_APP),
+            "--server.address=localhost",
+            "--browser.gatherUsageStats=false",
+            "--",
+            "--db",
+            str(db),
+            "--config",
+            str(config),
+        ]
+    ]
+    assert cli.UI_APP.exists()
+    assert "Ctrl+C pour l'arrêter" in capsys.readouterr().out
+
+
+def test_ui_stops_quietly_on_ctrl_c(monkeypatch, capsys, tmp_path):
+    db = tmp_path / "offers.db"
+    db.touch()
+    monkeypatch.setattr(cli.subprocess, "run", FakeRun(KeyboardInterrupt()))
+
+    assert cli.main(["ui", "--db", str(db)]) == 0
+    assert capsys.readouterr().out.endswith("Interface arrêtée.\n")
+
+
+def test_ui_without_database(monkeypatch, capsys, tmp_path):
+    run = FakeRun()
+    monkeypatch.setattr(cli.subprocess, "run", run)
+    db = tmp_path / "offers.db"
+
+    assert cli.main(["ui", "--db", str(db)]) == 1
+    output = capsys.readouterr().out
+    assert "Erreur : Base introuvable" in output
+    assert "python -m offers collect" in output
+    assert run.commands == []
+    assert not db.exists()
+
+
 def test_export_without_database(capsys, tmp_path):
     db = tmp_path / "offers.db"
     assert cli.main(["export", "--db", str(db), "--excel", str(tmp_path / "x.xlsx")]) == 1
