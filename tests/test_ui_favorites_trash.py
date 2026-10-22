@@ -16,7 +16,7 @@ from offers.storage.database import (
     save_follow_up,
     save_source_result,
 )
-from offers.ui import offer_card, offer_table
+from offers.ui import offer_card
 from offers.ui.offer_table import PageSettings
 from tests.factories import make_stored
 from tests.test_ui_offers import TIMEOUT, button, by_reference, offer, table
@@ -76,14 +76,12 @@ def write(db_path, action, offer_ids):
 # --- Favoris ------------------------------------------------------------------
 
 
-def test_favorites_without_yellow(open_page):
+def test_favorites_page(open_page):
     at = open_page(FAVORITES)
 
     assert not at.exception
     assert at.title[0].value == "Favoris (2)"
     assert titles(at) == ["Poste 1", "Poste 2"]
-    # Yellow on Offres, not on Favoris; blue stays.
-    assert list(table(at)[offer_table.MARKER]) == [browsing.NO_MARKER, browsing.MARKER_APPLIED]
 
 
 def test_favorites_has_the_columns_and_actions_of_offers(open_page):
@@ -93,7 +91,6 @@ def test_favorites_has_the_columns_and_actions_of_offers(open_page):
     assert list(table(favorites).columns) == list(table(offers).columns)
     assert [b.label for b in favorites.button] == [b.label for b in offers.button]
     assert [m.label for m in favorites.menu_button] == ["Statut", "Lettre"]
-    assert list(table(offers)[offer_table.MARKER])[0] == browsing.MARKER_FAVORITE
 
 
 def test_removing_a_favorite_takes_it_out_of_favorites(open_page, db_path, ids):
@@ -148,7 +145,8 @@ def test_card_in_the_trash_is_read_only_and_restores(open_page, db_path, ids):
 
     assert not at.exception
     assert not at.text_area and not at.selectbox
-    follow_up = at.table[1].value
+    # The follow-up shown under the list, without form.
+    follow_up = next(table.value for table in at.table if "Notes" in table.value.index)
     assert follow_up.loc["Notes"].iloc[0] == "Relancer"
 
     at.button(key="trash_card_action").click().run()

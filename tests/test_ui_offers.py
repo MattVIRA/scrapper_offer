@@ -128,7 +128,6 @@ def test_status_saved_in_the_database_is_shown(at, db_path, ids):
 
     at.run()
     assert table(at)[offer_table.STATUS][0] == "Postulé"
-    assert table(at)[offer_table.MARKER][0] == browsing.MARKER_APPLIED
     assert metrics(at)["Postulées"] == "1"
 
 
@@ -233,10 +232,10 @@ def test_table_frame():
 
     frame = table_frame([first, second], {1: ["REF7", "REF8"]})
 
-    # Read-only lines: no box nor button column, the status as a label.
+    # Read-only lines: no marker, box nor button column; the status as a label.
     assert list(frame.columns) == offer_table.COLUMNS
+    assert "Repère" not in frame.columns
     assert frame.to_dict("records")[0] | {"Publiée le": None} == {
-        offer_table.MARKER: browsing.MARKER_REJECTED,
         offer_table.UNREAD: False,
         offer_table.DUPLICATE: "REF7, REF8",
         "Score": 3,
@@ -255,14 +254,18 @@ def test_table_frame():
     }
     row = frame.to_dict("records")[1]
     assert row[offer_table.UNREAD] and pd.isna(row[offer_table.STATUS])
-    assert (row[offer_table.MARKER], row["En ligne"]) == (browsing.MARKER_OFFLINE, False)
+    assert row["En ligne"] is False
     assert row[offer_table.DUPLICATE] == "" and row["Favori"] == ""
 
 
-def test_no_yellow_in_the_favorites_table():
-    favorite = make_stored(1, favorite=True)
-    frame = table_frame([favorite], {}, on_favorites_page=True)
-    assert frame[offer_table.MARKER][0] == browsing.NO_MARKER
+def test_table_markers():
+    shown = [make_stored(1, favorite=True), make_stored(2, status="applied", favorite=True)]
+    assert offer_table.table_markers(shown) == [browsing.MARKER_FAVORITE, browsing.MARKER_APPLIED]
+    # No yellow on the Favorites page; blue stays.
+    assert offer_table.table_markers(shown, on_favorites_page=True) == [
+        browsing.NO_MARKER,
+        browsing.MARKER_APPLIED,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -277,18 +280,23 @@ def test_no_yellow_in_the_favorites_table():
     ],
 )
 def test_whole_line_takes_the_color_of_its_marker(changes, color):
-    frame = table_frame([make_stored(1, **changes)], {})
-    styles = offer_table.row_styles(frame.iloc[0])
+    shown = [make_stored(1, **changes)]
+    frame = table_frame(shown, {})
+    styles = offer_table.row_styles(frame.iloc[0], offer_table.table_markers(shown))
     assert len(styles) == len(offer_table.COLUMNS)
     assert all(f"background-color: {color}" in style for style in styles)
 
 
 def test_open_line_is_highlighted_above_its_color():
-    frame = table_frame([make_stored(1), make_stored(2, status="rejected")], {})
-    assert offer_table.row_styles(frame.iloc[1], open_row=1) == [offer_table.OPEN_ROW_STYLE] * len(
-        offer_table.COLUMNS
+    shown = [make_stored(1), make_stored(2, status="rejected")]
+    frame = table_frame(shown, {})
+    markers = offer_table.table_markers(shown)
+    width = len(offer_table.COLUMNS)
+    assert (
+        offer_table.row_styles(frame.iloc[1], markers, open_row=1)
+        == [offer_table.OPEN_ROW_STYLE] * width
     )
-    assert offer_table.row_styles(frame.iloc[0], open_row=1) == [""] * len(offer_table.COLUMNS)
+    assert offer_table.row_styles(frame.iloc[0], markers, open_row=1) == [""] * width
 
 
 def test_source_column_shows_the_label(at):
@@ -296,8 +304,9 @@ def test_source_column_shows_the_label(at):
 
 
 def test_line_without_marker_keeps_the_default_color():
-    frame = table_frame([make_stored(1, status="interesting")], {})
-    assert set(offer_table.row_styles(frame.iloc[0])) == {""}
+    shown = [make_stored(1, status="interesting")]
+    frame = table_frame(shown, {})
+    assert set(offer_table.row_styles(frame.iloc[0], offer_table.table_markers(shown))) == {""}
 
 
 def test_read_selection():

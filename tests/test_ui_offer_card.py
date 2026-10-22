@@ -249,6 +249,8 @@ def test_card_is_beside_the_list(start, ids):
 
     # The list stays shown with the card.
     assert list(table(at)["Titre"]) == ["Data analyst", "Comptable", "Comptable"]
+    # The follow-up under the list, the description beside it.
+    assert "**Suivi** · Comptable" in [m.value for m in at.markdown]
     assert at.subheader[0].value == "Comptable"
 
 

@@ -1,8 +1,9 @@
 """Card of one offer: everything about it, and its follow-up to edit.
 
-Shown beside the list, in the page: the list stays visible and
-clickable, with the line of the card highlighted. (A st.dialog greys the
-page behind it.) Opening the card marks the offer as read (offer_table).
+Shown in the page, not in a st.dialog (which greys the page behind it):
+the description beside the list, the follow-up under the list. The list
+stays visible and clickable, with the line of the card highlighted.
+Opening the card marks the offer as read (offer_table).
 """
 
 from collections.abc import Callable
@@ -27,6 +28,8 @@ from offers.ui.session import open_database
 DATE_FORMAT = "%d/%m/%Y"
 DATE_INPUT_FORMAT = "DD/MM/YYYY"
 MISSING = "—"
+# Height of the « Notes » field, in pixels: about three lines.
+NOTES_HEIGHT = 90
 ONLINE_LABEL = "Oui"
 OFFLINE_LABEL = "Plus en ligne"
 
@@ -83,18 +86,28 @@ def show_card(settings, stored, duplicates, action, editable=True, navigation=No
 
     duplicates: references of its probable duplicates.
     action: CardAction of the button at the bottom; it closes the card.
-    editable: False shows the follow-up without the form (trash).
+    editable: False hides the favorite button (trash).
     navigation: Navigation for the arrows; None hides them (offer no
         longer shown, after a change of its status for example).
+    The follow-up is shown apart, by show_follow_up_panel.
     """
     with st.container(border=True):
         show_header(settings, stored, navigation, editable)
         show_summary(stored, duplicates)
+        show_action(settings, stored, action)
+
+
+def show_follow_up_panel(settings, stored, editable=True):
+    """Follow-up of the open offer: the form, or only its values (trash)."""
+    with st.container(border=True):
+        # A short heading: the title of the offer is already beside the list.
+        st.markdown(f"**Suivi** · {stored.offer.title}")
+        if st.session_state.pop(settings.state_key("card_saved"), False):
+            st.success("Suivi enregistré.", icon=":material/check_circle:")
         if editable:
             show_follow_up_form(settings, stored)
         else:
             show_follow_up(stored)
-        show_action(settings, stored, action)
 
 
 def show_header(settings, stored, navigation, editable):
@@ -111,8 +124,6 @@ def show_header(settings, stored, navigation, editable):
         )
     if navigation:
         show_arrows(settings, navigation)
-    if st.session_state.pop(settings.state_key("card_saved"), False):
-        st.success("Suivi enregistré.", icon=":material/check_circle:")
     if editable:
         show_favorite_button(settings, stored)
 
@@ -224,7 +235,6 @@ def format_date(value):
 
 def show_follow_up(stored):
     """Show the follow-up without changing it."""
-    st.subheader("Suivi")
     st.table(follow_up(stored), border="horizontal", width="content")
 
 
@@ -249,24 +259,24 @@ def format_applied_on(text):
 def show_follow_up_form(settings, stored):
     """Form of the follow-up: nothing is written before « Enregistrer »."""
     key = partial(field_key, settings, stored.id)
-    with st.form(key("form")):
-        st.subheader("Suivi")
-        status = st.selectbox(
+    with st.form(key("form"), border=False):
+        # Statut, Lettre and Postulé le on one line; then Favori and Notes.
+        status_column, letter_column, date_column = st.columns(3)
+        status = status_column.selectbox(
             "Statut",
             STATUS_CHOICES,
             index=STATUS_CHOICES.index(to_widget_code(stored.status)),
             format_func=status_choice_label,
             key=key("status"),
         )
-        letter = st.selectbox(
+        letter = letter_column.selectbox(
             "Lettre",
             LETTER_CHOICES,
             index=LETTER_CHOICES.index(to_widget_code(stored.letter_status)),
             format_func=letter_choice_label,
             key=key("letter"),
         )
-        favorite = st.checkbox("Favori", value=stored.favorite, key=key("favorite"))
-        applied_on = st.date_input(
+        applied_on = date_column.date_input(
             "Postulé le",
             value=as_date(stored.applied_on),
             format=DATE_INPUT_FORMAT,
@@ -277,7 +287,10 @@ def show_follow_up_form(settings, stored):
                 f"Date tapée dans l'ancien Excel : « {stored.applied_on} ». "
                 "Elle est gardée tant qu'aucune date n'est choisie."
             )
-        notes = st.text_area("Notes", value=stored.notes or "", key=key("notes"))
+        favorite = st.checkbox("Favori", value=stored.favorite, key=key("favorite"))
+        notes = st.text_area(
+            "Notes", value=stored.notes or "", height=NOTES_HEIGHT, key=key("notes")
+        )
         if st.form_submit_button("Enregistrer", icon=":material/save:", type="primary"):
             with open_database(st.session_state.db_path) as conn:
                 save_follow_up(

@@ -50,13 +50,12 @@ RESTORE_ICON = ":material/restore_from_trash:"
 DATE_FORMAT = "DD/MM/YYYY"
 
 # Table columns.
-MARKER = "Repère"
 UNREAD = "Non lu"
 DUPLICATE = "Doublon de"
 STATUS = "Statut"
 # fmt: off
 COLUMNS = [
-    MARKER, UNREAD, DUPLICATE, "Score", "Titre", "Entreprise", "Source", "Pays", "Ville",
+    UNREAD, DUPLICATE, "Score", "Titre", "Entreprise", "Source", "Pays", "Ville",
     "Durée", "Publiée le", "Ajoutée le", STATUS, "Lettre", "Favori", "En ligne",
 ]
 # fmt: on
@@ -121,10 +120,12 @@ def show_offer_page(settings):
     if card is None:
         show_table(settings, shown, tags)
         return
-    # The card beside the list: the list stays visible and clickable.
+    # The description beside the list, the follow-up under it: the list
+    # stays visible and clickable.
     list_column, card_column = st.columns(LIST_AND_CARD, gap="medium")
     with list_column:
         show_table(settings, shown, tags, open_id=card.id)
+        offer_card.show_follow_up_panel(settings, card, editable=not settings.in_trash)
     with card_column:
         show_card(settings, card, shown, tags)
 
@@ -439,11 +440,12 @@ def show_table(settings, shown, tags, open_id=None):
     st.session_state[settings.state_key("rows")] = row_ids
     key = table_key(settings, row_ids)
     st.session_state[settings.state_key("table_key")] = key
-    frame = table_frame(shown, tags, on_favorites_page=settings.favorites_only)
+    frame = table_frame(shown, tags)
     checked = st.session_state[settings.state_key("selected")]
     open_row = row_ids.index(open_id) if open_id in row_ids else None
+    markers = table_markers(shown, on_favorites_page=settings.favorites_only)
     st.dataframe(
-        frame.style.apply(row_styles, axis=1, open_row=open_row),
+        frame.style.apply(row_styles, axis=1, markers=markers, open_row=open_row),
         key=key,
         # st.dataframe takes no args for its callback.
         on_select=partial(on_table_select, settings, key),
@@ -468,7 +470,6 @@ def table_key(settings, row_ids):
 
 def column_config():
     return {
-        MARKER: st.column_config.TextColumn(MARKER, width="small", pinned=True),
         UNREAD: st.column_config.CheckboxColumn(UNREAD, width="small"),
         DUPLICATE: st.column_config.TextColumn(DUPLICATE, help="Doublons probables"),
         "Score": st.column_config.NumberColumn("Score", width="small"),
@@ -480,19 +481,23 @@ def column_config():
     }
 
 
-def table_frame(shown, tags, on_favorites_page=False):
+def table_markers(shown, on_favorites_page=False):
+    """Return the marker of each offer shown, which gives the color of its line."""
+    return [browsing.marker(stored, on_favorites_page) for stored in shown]
+
+
+def table_frame(shown, tags):
     """Return the table of the offers shown, one row per offer, in their order.
 
     tags: {offer id: references of its probable duplicates}.
     """
-    rows = [table_row(stored, tags, on_favorites_page) for stored in shown]
+    rows = [table_row(stored, tags) for stored in shown]
     return pd.DataFrame(rows, columns=COLUMNS)
 
 
-def table_row(stored, tags, on_favorites_page):
+def table_row(stored, tags):
     offer = stored.offer
     return {
-        MARKER: browsing.marker(stored, on_favorites_page),
         UNREAD: browsing.is_unread(stored),
         DUPLICATE: ", ".join(tags.get(stored.id, [])),
         "Score": stored.score,
@@ -511,14 +516,15 @@ def table_row(stored, tags, on_favorites_page):
     }
 
 
-def row_styles(row, open_row=None):
+def row_styles(row, markers, open_row=None):
     """Return the CSS of each cell of a table row: the color of its marker.
 
+    markers: marker of each row (table_markers); row.name is its number.
     open_row: number of the row whose card is open, highlighted instead.
     """
     if row.name == open_row:
         return [OPEN_ROW_STYLE] * len(row)
-    return [ROW_STYLES.get(row[MARKER], "")] * len(row)
+    return [ROW_STYLES.get(markers[row.name], "")] * len(row)
 
 
 def on_table_select(settings, key):
