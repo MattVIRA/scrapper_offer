@@ -35,7 +35,7 @@ class Source(ABC):
 
     @abstractmethod
     def collect(self) -> list[FoundOffer]:
-        """Return the offers of all configured searches, in search order."""
+        """Return the offers of the active searches (enabled), in search order."""
 
     @abstractmethod
     def online_offers(self) -> list[Offer] | None:

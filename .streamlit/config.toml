@@ -1,0 +1,6 @@
+# The interface only listens on the Mac, even when launched by hand.
+[server]
+address = "localhost"
+
+[browser]
+gatherUsageStats = false

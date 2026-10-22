@@ -64,7 +64,7 @@ class BusinessFranceSource(Source):
 
     def collect(self):
         found = []
-        for search in self.config.searches:
+        for search in self.config.active_searches():
             print(f"Recherche « {search.name} »...")
             filters = filters_from_url(search.url)
             for raw in search_offers(self.session, self.api_key(), filters):

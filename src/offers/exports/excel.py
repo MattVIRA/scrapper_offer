@@ -1,50 +1,37 @@
 """Excel file of the offers, exported from the database.
 
-Rules:
-- the file is never overwritten;
-- new offers are added at the bottom;
-- rows already present are neither moved nor rewritten, except the
-  "En ligne", "Score" and "Mots trouvés" columns, and "Source" when it
-  is empty;
-- the user's columns are never modified, not even on a new row;
-- a row whose reference is not in the database is not modified.
-
-Columns are found by their title, not by their position: the user can
-sort the file, move or add columns.
+The file is only for reading: it is written again from scratch at each
+export, and nothing is read from it. The follow-up is entered in the
+interface.
 """
 
 import os
 import shutil
-import zipfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
-from openpyxl.utils.exceptions import InvalidFileException
-from openpyxl.worksheet.datavalidation import DataValidation
 
 from offers.errors import OffersError
 from offers.sources import source_label
-from offers.tracking import STATUSES
+from offers.tracking import letter_label, status_label
 
-# Columns filled by the program.
+# Columns of the offer.
 # fmt: off
 SCRIPT_COLUMNS = [
     "Réf.", "Titre", "Entreprise", "Pays", "Ville", "Durée", "Publiée le",
     "Ajoutée le", "En ligne", "Score", "Mots trouvés", "Lien", "Recherche", "Source",
 ]
 # fmt: on
-# Columns reserved for the user. The program only writes their title.
-USER_COLUMNS = ["Statut", "Postulé le", "Notes"]
+# Columns of the user's follow-up, filled from the database.
+TRACKING_COLUMNS = ["Statut", "Lettre", "Favori", "Postulé le", "Notes"]
+COLUMNS = SCRIPT_COLUMNS + TRACKING_COLUMNS
 
-STATUS_CHOICES = list(STATUSES.values())
-STATUS_FORMULA = '"' + ",".join(STATUS_CHOICES) + '"'
-# Drop-down list set by the program in lot 1, replaced by the current one.
-OLD_STATUS_FORMULAS = ['"À voir,Intéressant,Postulé,Refusé,Pas pour moi"']
 ONLINE = "Oui"
 NO_LONGER_ONLINE = "Plus en ligne"
+FAVORITE = "Oui"
 LINK_TEXT = "Ouvrir l'offre"
 SHEET_TITLE = "Offres"
 
@@ -53,16 +40,14 @@ WIDTHS = {
     "Réf.": 12, "Titre": 55, "Entreprise": 28, "Pays": 22, "Ville": 18,
     "Durée": 8, "Publiée le": 12, "Ajoutée le": 12, "En ligne": 14,
     "Score": 7, "Mots trouvés": 28, "Lien": 16, "Recherche": 22, "Source": 16,
-    "Statut": 14, "Postulé le": 12, "Notes": 40,
+    "Statut": 14, "Lettre": 12, "Favori": 8, "Postulé le": 12, "Notes": 40,
 }
 # fmt: on
 DATE_FORMAT = "DD/MM/YYYY"
-DATE_COLUMNS = ("Publiée le", "Ajoutée le")
-# Light green background of the offers added today.
+DATE_COLUMNS = ("Publiée le", "Ajoutée le", "Postulé le")
+# Light green background of the offers first seen today.
 NEW_COLOR = "FFE2F0D9"
 NEW_FILL = PatternFill("solid", fgColor=NEW_COLOR)
-# The "Statut" drop-down list is set down to this row.
-STATUS_LAST_ROW = 20000
 BACKUP_DIR = "backup"
 LOCK_PREFIX = "~$"
 
@@ -73,11 +58,10 @@ class ExcelError(OffersError):
 
 @dataclass(frozen=True)
 class ExcelReport:
-    """What an update changed in the file."""
+    """What an export wrote."""
 
-    added: int
-    # Rows marked as no longer online in this file.
-    removed: int
+    # Offers written, one per row.
+    rows: int
 
 
 def check_file_closed(path):
@@ -102,25 +86,6 @@ def save_backup(path):
         raise ExcelError(f"Impossible de sauvegarder {path} dans {backup_dir} : {err}") from err
 
 
-def open_workbook(path):
-    """Return the existing workbook, or a new one if the file does not exist."""
-    if not os.path.exists(path):
-        workbook = Workbook()
-        sheet = workbook.active
-        sheet.title = SHEET_TITLE
-        sheet.freeze_panes = "A2"
-        return workbook
-    return read_workbook(path)
-
-
-def read_workbook(path):
-    """Return the workbook of an existing file."""
-    try:
-        return load_workbook(path)
-    except (OSError, zipfile.BadZipFile, InvalidFileException) as err:
-        raise ExcelError(f"Impossible de lire {path} : {err}") from err
-
-
 def save_workbook(workbook, path):
     """Save atomically: a temporary file first, then it replaces the old one.
 
@@ -137,48 +102,21 @@ def save_workbook(workbook, path):
         raise ExcelError(f"Impossible d'écrire {path} : {err}") from err
 
 
-def read_columns(sheet):
-    """Return the number of each column, from the titles of row 1."""
-    columns = {}
-    for cell in sheet[1]:
-        if cell.value is not None:
-            columns[str(cell.value).strip()] = cell.column
-    return columns
-
-
-def check_reference_column(columns):
-    """Stop if the "Réf." column, needed to recognize the offers, is missing."""
-    if "Réf." not in columns:
-        raise ExcelError(
-            'La colonne "Réf." est introuvable dans le fichier Excel. '
-            "Le script en a besoin pour reconnaître les offres."
-        )
-
-
-def add_missing_columns(sheet, columns):
-    """Add the missing columns on the right (all of them, if the file is new)."""
-    for title in SCRIPT_COLUMNS + USER_COLUMNS:
-        if title in columns:
-            continue
-        number = max(columns.values(), default=0) + 1
-        cell = sheet.cell(row=1, column=number, value=title)
-        cell.font = Font(bold=True)
+def new_sheet(workbook):
+    """Set up the sheet: title, bold column titles, widths, frozen first row."""
+    sheet = workbook.active
+    sheet.title = SHEET_TITLE
+    sheet.freeze_panes = "A2"
+    for number, title in enumerate(COLUMNS, 1):
+        sheet.cell(row=1, column=number, value=title).font = Font(bold=True)
         sheet.column_dimensions[get_column_letter(number)].width = WIDTHS[title]
-        columns[title] = number
+    return sheet
 
 
-def last_row(sheet):
-    """Return the number of the last row that contains something."""
-    row = sheet.max_row
-    while row > 1 and all(c.value is None for c in sheet[row]):
-        row -= 1
-    return row
-
-
-def write_new_row(sheet, columns, row, stored, highlight):
-    """Write a new offer (a StoredOffer) on the given row."""
+def row_values(stored):
+    """Return {column title: value} for a StoredOffer."""
     offer = stored.offer
-    values = {
+    return {
         "Réf.": offer.reference,
         "Titre": offer.title,
         "Entreprise": offer.company,
@@ -193,131 +131,61 @@ def write_new_row(sheet, columns, row, stored, highlight):
         "Lien": LINK_TEXT,
         "Recherche": stored.search_name,
         "Source": source_label(offer.source),
+        "Statut": status_label(stored.status) if stored.status else None,
+        "Lettre": letter_label(stored.letter_status) if stored.letter_status else None,
+        "Favori": FAVORITE if stored.favorite else None,
+        "Postulé le": as_date(stored.applied_on),
+        "Notes": stored.notes,
     }
-    for title, value in values.items():
-        cell = sheet.cell(row=row, column=columns[title], value=value)
+
+
+def as_date(text):
+    """Return an ISO date text as a date; other texts are kept as they are.
+
+    The import of the old Excel file (lot 2) kept dates typed as text.
+    """
+    try:
+        return date.fromisoformat(text) if text else None
+    except ValueError:
+        return text
+
+
+def write_row(sheet, row, stored, highlight):
+    """Write a StoredOffer on the given row."""
+    for number, (title, value) in enumerate(row_values(stored).items(), 1):
+        cell = sheet.cell(row=row, column=number, value=value)
         if title in DATE_COLUMNS:
             cell.number_format = DATE_FORMAT
         if title == "Lien":
-            cell.hyperlink = offer.url
+            cell.hyperlink = stored.offer.url
             cell.style = "Hyperlink"
         if highlight:
             cell.fill = NEW_FILL
-    sheet.cell(row=row, column=columns["Postulé le"]).number_format = DATE_FORMAT
 
 
-def remove_old_highlight(sheet, columns, end, today):
-    """Remove the green background of the offers added before today.
+def write_workbook(path, stored_offers, today):
+    """Write a new Excel file with the offers that are not in the trash.
 
-    Only the program's green is removed; colors set by hand are kept.
-    """
-    for row in range(2, end + 1):
-        added_on = sheet.cell(row=row, column=columns["Ajoutée le"]).value
-        if isinstance(added_on, datetime):
-            added_on = added_on.date()
-        if added_on == today:
-            continue
-        for cell in sheet[row]:
-            if cell.fill.fgColor.rgb == NEW_COLOR:
-                cell.fill = PatternFill()
-
-
-def update_existing_rows(sheet, columns, end, stored_offers):
-    """Update "En ligne", "Score", "Mots trouvés" and an empty "Source".
-
-    stored_offers: StoredOffer by reference. Rows of offers no longer
-        online keep their last score.
-    Return the references present and the number of rows marked as no
-    longer online.
-    """
-    present = set()
-    removed = 0
-    for row in range(2, end + 1):
-        ref = sheet.cell(row=row, column=columns["Réf."]).value
-        if not ref:
-            continue
-        present.add(ref)
-        stored = stored_offers.get(ref)
-        if stored is None:
-            continue
-        online_cell = sheet.cell(row=row, column=columns["En ligne"])
-        if stored.online:
-            online_cell.value = ONLINE
-            # No score yet for an offer imported from this file.
-            if stored.score is not None:
-                sheet.cell(row=row, column=columns["Score"]).value = stored.score
-                sheet.cell(row=row, column=columns["Mots trouvés"]).value = stored.words
-            source_cell = sheet.cell(row=row, column=columns["Source"])
-            if source_cell.value is None:
-                source_cell.value = source_label(stored.offer.source)
-        elif online_cell.value != NO_LONGER_ONLINE:
-            online_cell.value = NO_LONGER_ONLINE
-            removed += 1
-    return present, removed
-
-
-def add_status_list(sheet, columns):
-    """Add the drop-down list of the "Statut" column."""
-    letter = get_column_letter(columns["Statut"])
-    choices = DataValidation(type="list", formula1=STATUS_FORMULA, allow_blank=True)
-    choices.add(f"{letter}2:{letter}{STATUS_LAST_ROW}")
-    sheet.add_data_validation(choices)
-
-
-def update_status_list(sheet):
-    """Replace the program's old drop-down list by the current statuses.
-
-    A list added by hand is recognized by its formula, and kept.
-    """
-    for validation in sheet.data_validations.dataValidation:
-        if validation.formula1 in OLD_STATUS_FORMULAS:
-            validation.formula1 = STATUS_FORMULA
-
-
-def update_workbook(path, stored_offers, today):
-    """Create the Excel file, or add the new offers to the existing file.
-
-    stored_offers: StoredOffer list (database.list_offers), sorted by
-        first_seen then id: the order in which new offers are added.
-    today: offers first seen on that day get a green background.
+    stored_offers: StoredOffer list (database.list_offers); written in the
+        order of first_seen, then id.
+    today: offers first seen on that day get a green background, except
+        when the file did not exist yet: everything would be green.
     """
     check_file_closed(path)
     file_exists = os.path.exists(path)
-    workbook = open_workbook(path)
-    sheet = workbook.active
-
-    columns = read_columns(sheet)
-    if file_exists:
-        check_reference_column(columns)
-    add_missing_columns(sheet, columns)
-    end = last_row(sheet)
-
-    by_reference = {stored.offer.reference: stored for stored in stored_offers}
-    present, removed = update_existing_rows(sheet, columns, end, by_reference)
-    remove_old_highlight(sheet, columns, end, today)
-
-    # New offers, at the bottom. On the first run there is no green
-    # background: everything would be green.
-    added = 0
-    for stored in stored_offers:
-        ref = stored.offer.reference
-        if ref in present:
-            continue
-        present.add(ref)
-        end += 1
+    workbook = Workbook()
+    sheet = new_sheet(workbook)
+    shown = sorted(
+        (stored for stored in stored_offers if not stored.hidden),
+        key=lambda stored: (stored.first_seen, stored.id),
+    )
+    for row, stored in enumerate(shown, 2):
         highlight = file_exists and stored.first_seen.date() == today
-        write_new_row(sheet, columns, end, stored, highlight)
-        added += 1
-
-    # The auto filter must also cover the new rows.
-    sheet.auto_filter.ref = f"A1:{get_column_letter(sheet.max_column)}{end}"
-    if file_exists:
-        update_status_list(sheet)
-    else:
-        add_status_list(sheet, columns)
+        write_row(sheet, row, stored, highlight)
+    sheet.auto_filter.ref = f"A1:{get_column_letter(len(COLUMNS))}{len(shown) + 1}"
 
     # Backup last: nothing is written while an error is still possible.
     if file_exists:
         save_backup(path)
     save_workbook(workbook, path)
-    return ExcelReport(added=added, removed=removed)
+    return ExcelReport(rows=len(shown))

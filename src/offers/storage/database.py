@@ -10,22 +10,26 @@ from datetime import date, datetime
 from importlib.resources import files
 from pathlib import Path
 
+from offers.backups import remove_old_backups
 from offers.errors import OffersError
 from offers.model import Offer
 from offers.scoring.keywords import normalize
+from offers.tracking import LETTER_STATUSES, STATUSES
 
+STORAGE_FILES = files("offers.storage")
 # Schema changes, applied in order. The schema version stored in
 # PRAGMA user_version is the number of migrations already applied: never
 # change or remove one, add a new one at the end.
 MIGRATIONS = [
-    files("offers.storage").joinpath("schema.sql").read_text(encoding="utf-8"),
+    STORAGE_FILES.joinpath("schema.sql").read_text(encoding="utf-8"),
+    STORAGE_FILES.joinpath("migrations", "002_tracking_ui.sql").read_text(encoding="utf-8"),
+    STORAGE_FILES.joinpath("migrations", "003_fewer_statuses.sql").read_text(encoding="utf-8"),
 ]
 
 
 KEYWORDS_METHOD = "keywords"
 BACKUP_DIR = "backup"
 BACKUP_PREFIX = "offers_"
-BACKUPS_KEPT = 30
 # Spaces and punctuation, ignored when comparing titles and companies.
 SEPARATORS = re.compile(r"[\W_]+")
 # Offer fields stored in their own column of the offers table.
@@ -67,6 +71,12 @@ class StoredOffer:
     status: str | None
     applied_on: str | None
     notes: str | None
+    letter_status: str | None
+    favorite: bool
+    # None: the offer was never opened.
+    read_at: datetime | None
+    # In the trash.
+    hidden: bool
 
 
 @dataclass(frozen=True)
@@ -178,22 +188,6 @@ def first_search_of_each_offer(found):
     return result
 
 
-def find_offer_id(conn, source_name, source_id):
-    """Return the id of a stored offer, or None."""
-    row = conn.execute(
-        "SELECT id FROM offers WHERE source = ? AND source_id = ?", (source_name, source_id)
-    ).fetchone()
-    return row["id"] if row else None
-
-
-def find_offer_id_by_reference(conn, source_name, reference):
-    """Return the id of a stored offer from its reference, or None."""
-    row = conn.execute(
-        "SELECT id FROM offers WHERE source = ? AND reference = ?", (source_name, reference)
-    ).fetchone()
-    return row["id"] if row else None
-
-
 def known_offer_ids(conn, source_name):
     """Return {source_id: id} of the offers of a source already stored."""
     rows = conn.execute("SELECT id, source_id FROM offers WHERE source = ?", (source_name,))
@@ -208,19 +202,10 @@ def offer_values(offer):
     return [*values, json.dumps(offer.raw, ensure_ascii=False)]
 
 
-def insert_offer(conn, offer, search_name, now, first_seen=None, online=True):
-    """Add an offer; return its id.
-
-    first_seen: when the offer was first seen, if before now.
-    """
+def insert_offer(conn, offer, search_name, now):
+    """Add an offer, seen online now; return its id."""
     columns = [*OFFER_COLUMNS, "raw", "search_name", "first_seen", "last_seen", "online"]
-    values = [
-        *offer_values(offer),
-        search_name,
-        to_text(first_seen or now),
-        to_text(now),
-        int(online),
-    ]
+    values = [*offer_values(offer), search_name, to_text(now), to_text(now), 1]
     cursor = conn.execute(
         f"INSERT INTO offers ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
         values,
@@ -272,24 +257,93 @@ def load_tracking(conn, offer_id):
     return conn.execute("SELECT * FROM tracking WHERE offer_id = ?", (offer_id,)).fetchone()
 
 
-def save_tracking(conn, offer_id, status, applied_on, notes, now):
-    """Write the user's follow-up of an offer, replacing the previous one.
+def set_status(conn, offer_ids, status, now):
+    """Set the status of the offers; None removes it."""
+    check_code(status, STATUSES)
+    update_tracking(conn, offer_ids, {"status": status}, now)
 
-    status: code of offers.tracking.STATUSES, or None.
+
+def set_letter_status(conn, offer_ids, letter_status, now):
+    """Set the letter status of the offers; None means no letter."""
+    check_code(letter_status, LETTER_STATUSES)
+    update_tracking(conn, offer_ids, {"letter_status": letter_status}, now)
+
+
+def set_favorite(conn, offer_ids, favorite, now):
+    """Add the offers to the favorites, or remove them."""
+    update_tracking(conn, offer_ids, {"favorite": int(favorite)}, now)
+
+
+def mark_read(conn, offer_ids, now):
+    """Mark the offers as read; an offer already read keeps its read_at."""
+    update_tracking(conn, offer_ids, {"read_at": to_text(now)}, now, only_if="read_at IS NULL")
+
+
+def hide(conn, offer_ids, now):
+    """Put the offers in the trash; they are never deleted."""
+    update_tracking(conn, offer_ids, {"hidden": 1}, now)
+
+
+def restore(conn, offer_ids, now):
+    """Take the offers out of the trash."""
+    update_tracking(conn, offer_ids, {"hidden": 0}, now)
+
+
+def save_tracking_details(conn, offer_id, applied_on, notes, now):
+    """Write the application date and the notes of an offer.
+
+    applied_on: date, or None. Empty notes are stored as None.
     """
-    try:
-        conn.execute(
-            "INSERT INTO tracking (offer_id, status, applied_on, notes, updated_at) "
-            "VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT (offer_id) DO UPDATE SET status = excluded.status, "
-            "applied_on = excluded.applied_on, notes = excluded.notes, "
-            "updated_at = excluded.updated_at",
-            (offer_id, status, to_text(applied_on), notes, to_text(now)),
-        )
-    except sqlite3.Error as err:
-        raise StorageError(
-            f"Impossible d'enregistrer le suivi de l'offre {offer_id} : {err}"
-        ) from err
+    update_tracking(
+        conn, [offer_id], {"applied_on": to_text(applied_on), "notes": notes or None}, now
+    )
+
+
+def save_follow_up(conn, offer_id, status, letter_status, applied_on, notes, now):
+    """Write the follow-up of an offer at once, as entered in its card.
+
+    The favorite has its own button in the card (set_favorite).
+
+    applied_on: date, text (kept from the old Excel file) or None. Empty
+    notes are stored as None.
+    """
+    check_code(status, STATUSES)
+    check_code(letter_status, LETTER_STATUSES)
+    fields = {
+        "status": status,
+        "letter_status": letter_status,
+        "applied_on": to_text(applied_on),
+        "notes": notes or None,
+    }
+    update_tracking(conn, [offer_id], fields, now)
+
+
+def check_code(code, codes):
+    """Refuse a code that is neither None nor one of codes."""
+    if code is not None and code not in codes:
+        raise ValueError(f"Code inconnu : {code!r} (attendu : {', '.join(codes)} ou None)")
+
+
+def update_tracking(conn, offer_ids, fields, now, only_if=None):
+    """Write fields ({column: value}) in the tracking of the offers.
+
+    Create the missing tracking rows; all offers are written, or none.
+    only_if: SQL condition; rows that do not meet it are left unchanged.
+    """
+    values = {**fields, "updated_at": to_text(now)}
+    assignments = ", ".join(f"{column} = ?" for column in values)
+    condition = f" AND {only_if}" if only_if else ""
+    with transaction(conn, "Impossible d'enregistrer le suivi, rien n'a été modifié"):
+        for offer_id in offer_ids:
+            conn.execute(
+                "INSERT INTO tracking (offer_id, updated_at) VALUES (?, ?) "
+                "ON CONFLICT (offer_id) DO NOTHING",
+                (offer_id, to_text(now)),
+            )
+            conn.execute(
+                f"UPDATE tracking SET {assignments} WHERE offer_id = ?{condition}",
+                [*values.values(), offer_id],
+            )
 
 
 def count_offers(conn):
@@ -312,7 +366,8 @@ def list_offers(conn):
     """Return all offers as StoredOffer, by first_seen then id."""
     try:
         rows = conn.execute(
-            "SELECT o.*, t.status, t.applied_on, t.notes, "
+            "SELECT o.*, t.status, t.applied_on, t.notes, t.letter_status, t.favorite, "
+            "t.read_at, t.hidden, "
             "e.score, e.justification AS words "
             "FROM offers o "
             "LEFT JOIN tracking t ON t.offer_id = o.id "
@@ -339,6 +394,11 @@ def stored_offer(row):
         status=row["status"],
         applied_on=row["applied_on"],
         notes=row["notes"],
+        letter_status=row["letter_status"],
+        # No tracking row: not a favorite, not read, not hidden.
+        favorite=bool(row["favorite"]),
+        read_at=datetime.fromisoformat(row["read_at"]) if row["read_at"] else None,
+        hidden=bool(row["hidden"]),
     )
 
 
@@ -413,7 +473,7 @@ def backup_database(path, now):
         backup_dir.mkdir(exist_ok=True)
         copy_database(path, temporary)
         os.replace(temporary, target)
-        remove_old_backups(backup_dir)
+        remove_old_backups(backup_dir, f"{BACKUP_PREFIX}*.db")
     except (OSError, sqlite3.Error) as err:
         temporary.unlink(missing_ok=True)
         raise StorageError(
@@ -434,14 +494,6 @@ def copy_database(source_path, target_path):
             target.close()
     finally:
         source.close()
-
-
-def remove_old_backups(backup_dir):
-    """Delete the oldest backups, keeping BACKUPS_KEPT."""
-    # The date in the name sorts the backups from the oldest.
-    backups = sorted(backup_dir.glob(f"{BACKUP_PREFIX}*.db"))
-    for old in backups[:-BACKUPS_KEPT]:
-        old.unlink()
 
 
 def probable_duplicates(conn):

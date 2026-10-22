@@ -2,13 +2,8 @@
  "jour_1": {
   "titre_feuille": "Offres",
   "volets_figes": "A2",
-  "filtre": "A1:Q5",
-  "listes": [
-   {
-    "formule": "\"À voir,Intéressant,À rédiger,Lettre prête,Postulé,Réponse,Refusé,Pas pour moi\"",
-    "plage": "O2:O20000"
-   }
-  ],
+  "filtre": "A1:S5",
+  "listes": [],
   "cellules": [
    [
     "Réf.",
@@ -26,6 +21,8 @@
     "Recherche",
     "Source",
     "Statut",
+    "Lettre",
+    "Favori",
     "Postulé le",
     "Notes"
    ],
@@ -44,6 +41,8 @@
     "Ouvrir l'offre",
     "Recherche principale",
     "Business France",
+    null,
+    null,
     null,
     null,
     null
@@ -65,6 +64,8 @@
     "Business France",
     null,
     null,
+    null,
+    null,
     null
    ],
    [
@@ -82,6 +83,8 @@
     "Ouvrir l'offre",
     "Recherche principale",
     "Business France",
+    null,
+    null,
     null,
     null,
     null
@@ -103,9 +106,82 @@
     "Business France",
     null,
     null,
+    null,
+    null,
     null
    ]
   ],
+  "formats": [
+   [
+    "G2",
+    "DD/MM/YYYY"
+   ],
+   [
+    "H2",
+    "DD/MM/YYYY"
+   ],
+   [
+    "R2",
+    "DD/MM/YYYY"
+   ],
+   [
+    "G3",
+    "DD/MM/YYYY"
+   ],
+   [
+    "H3",
+    "DD/MM/YYYY"
+   ],
+   [
+    "R3",
+    "DD/MM/YYYY"
+   ],
+   [
+    "G4",
+    "DD/MM/YYYY"
+   ],
+   [
+    "H4",
+    "DD/MM/YYYY"
+   ],
+   [
+    "R4",
+    "DD/MM/YYYY"
+   ],
+   [
+    "G5",
+    "DD/MM/YYYY"
+   ],
+   [
+    "H5",
+    "DD/MM/YYYY"
+   ],
+   [
+    "R5",
+    "DD/MM/YYYY"
+   ]
+  ],
+  "largeurs": {
+   "A": 12.0,
+   "B": 55.0,
+   "C": 28.0,
+   "D": 22.0,
+   "E": 18.0,
+   "F": 8.0,
+   "G": 12.0,
+   "H": 12.0,
+   "I": 14.0,
+   "J": 7.0,
+   "K": 28.0,
+   "L": 16.0,
+   "M": 22.0,
+   "N": 16.0,
+   "O": 14.0,
+   "P": 12.0,
+   "Q": 8.0,
+   "R": 12.0,
+   "S": 40.0
+  },
   "liens": [
    [
     "L2",
@@ -128,12 +204,11 @@
  },
  "jour_2": {
   "titre_feuille": "Offres",
-  "volets_figes": null,
-  "filtre": "A1:R6",
+  "volets_figes": "A2",
+  "filtre": "A1:S5",
   "listes": [],
   "cellules": [
    [
-    "Notes",
     "Réf.",
     "Titre",
     "Entreprise",
@@ -149,11 +224,12 @@
     "Recherche",
     "Source",
     "Statut",
+    "Lettre",
+    "Favori",
     "Postulé le",
-    "Ma colonne"
+    "Notes"
    ],
    [
-    "Relancer lundi",
     "VIE247348",
     "Junior Scientific Food Affairs Advisor (H/F)",
     "FERRERO FRANCE COMMERCIALE",
@@ -168,12 +244,13 @@
     "Ouvrir l'offre",
     "Recherche principale",
     "Business France",
-    "Postulé",
-    "2026-10-20T00:00:00",
-    "perso 1"
+    null,
+    null,
+    null,
+    null,
+    null
    ],
    [
-    "Bof",
     "VIE247346",
     "OCS Field Engineer/Coordinator (H/F)",
     "COLAS RAIL",
@@ -188,12 +265,13 @@
     "Ouvrir l'offre",
     "Recherche principale",
     "Business France",
-    "Intéressant",
+    "Postulé",
+    null,
+    null,
     "2026-10-20T00:00:00",
-    "perso 2"
+    "Relancer lundi"
    ],
    [
-    null,
     "VIE247344",
     "Finance Controller (H/F)",
     "OPMOBILITY EXTERIOR SERVICES",
@@ -208,32 +286,13 @@
     "Ouvrir l'offre",
     "Recherche principale",
     "Business France",
-    null,
-    null,
-    "perso 3"
-   ],
-   [
-    null,
-    "VIE247338",
-    "VIE Geothermal Research Scientist (H/F)",
-    "SERVICES TECHNIQUES SCHLUMBERGER",
-    "ROYAUME-UNI",
-    "CAMBRIDGE",
-    24,
-    "2026-10-21T00:00:00",
-    "2026-10-20T00:00:00",
+    "Pas pour moi",
+    "À rédiger",
     "Oui",
-    2,
-    "python, data",
-    "Ouvrir l'offre",
-    "Recherche principale",
-    "Business France",
     null,
-    null,
-    "perso 4"
+    null
    ],
    [
-    null,
     "VIE247336",
     "Chargé(e) de mission en Stratégie et Développement Commercial (H/F)",
     "EFE INTERNATIONAL",
@@ -250,70 +309,175 @@
     "Business France",
     null,
     null,
+    null,
+    null,
     null
    ]
   ],
+  "formats": [
+   [
+    "G2",
+    "DD/MM/YYYY"
+   ],
+   [
+    "H2",
+    "DD/MM/YYYY"
+   ],
+   [
+    "R2",
+    "DD/MM/YYYY"
+   ],
+   [
+    "G3",
+    "DD/MM/YYYY"
+   ],
+   [
+    "H3",
+    "DD/MM/YYYY"
+   ],
+   [
+    "R3",
+    "DD/MM/YYYY"
+   ],
+   [
+    "G4",
+    "DD/MM/YYYY"
+   ],
+   [
+    "H4",
+    "DD/MM/YYYY"
+   ],
+   [
+    "R4",
+    "DD/MM/YYYY"
+   ],
+   [
+    "G5",
+    "DD/MM/YYYY"
+   ],
+   [
+    "H5",
+    "DD/MM/YYYY"
+   ],
+   [
+    "R5",
+    "DD/MM/YYYY"
+   ]
+  ],
+  "largeurs": {
+   "A": 12.0,
+   "B": 55.0,
+   "C": 28.0,
+   "D": 22.0,
+   "E": 18.0,
+   "F": 8.0,
+   "G": 12.0,
+   "H": 12.0,
+   "I": 14.0,
+   "J": 7.0,
+   "K": 28.0,
+   "L": 16.0,
+   "M": 22.0,
+   "N": 16.0,
+   "O": 14.0,
+   "P": 12.0,
+   "Q": 8.0,
+   "R": 12.0,
+   "S": 40.0
+  },
   "liens": [
    [
-    "M6",
+    "L2",
+    "https://mon-vie-via.businessfrance.fr/offres/247348"
+   ],
+   [
+    "L3",
+    "https://mon-vie-via.businessfrance.fr/offres/247346"
+   ],
+   [
+    "L4",
+    "https://mon-vie-via.businessfrance.fr/offres/247344"
+   ],
+   [
+    "L5",
     "https://mon-vie-via.businessfrance.fr/offres/247336"
    ]
   ],
   "fonds": [
    [
-    "B6",
+    "A5",
     "FFE2F0D9"
    ],
    [
-    "C6",
+    "B5",
     "FFE2F0D9"
    ],
    [
-    "D6",
+    "C5",
     "FFE2F0D9"
    ],
    [
-    "E6",
+    "D5",
     "FFE2F0D9"
    ],
    [
-    "F6",
+    "E5",
     "FFE2F0D9"
    ],
    [
-    "G6",
+    "F5",
     "FFE2F0D9"
    ],
    [
-    "H6",
+    "G5",
     "FFE2F0D9"
    ],
    [
-    "I6",
+    "H5",
     "FFE2F0D9"
    ],
    [
-    "J6",
+    "I5",
     "FFE2F0D9"
    ],
    [
-    "K6",
+    "J5",
     "FFE2F0D9"
    ],
    [
-    "L6",
+    "K5",
     "FFE2F0D9"
    ],
    [
-    "M6",
+    "L5",
     "FFE2F0D9"
    ],
    [
-    "N6",
+    "M5",
     "FFE2F0D9"
    ],
    [
-    "O6",
+    "N5",
+    "FFE2F0D9"
+   ],
+   [
+    "O5",
+    "FFE2F0D9"
+   ],
+   [
+    "P5",
+    "FFE2F0D9"
+   ],
+   [
+    "Q5",
+    "FFE2F0D9"
+   ],
+   [
+    "R5",
+    "FFE2F0D9"
+   ],
+   [
+    "S5",
     "FFE2F0D9"
    ]
   ]

@@ -11,6 +11,8 @@ dependencies = [
     "requests>=2.34.2",
     "openpyxl>=3.1.5",
     "pyyaml>=6.0.3",
+    "streamlit>=1.66",
+    "ruamel.yaml>=0.19",
 ]
 
 [project.optional-dependencies]
@@ -26,7 +28,7 @@ offers = "offers.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"offers.storage" = ["schema.sql"]
+"offers.storage" = ["schema.sql", "migrations/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

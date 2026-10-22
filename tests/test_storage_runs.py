@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from offers.backups import BACKUPS_KEPT
 from offers.storage import database
 from offers.storage.database import (
     SaveReport,
@@ -71,11 +72,11 @@ def test_backup_sees_the_wal_content(conn, path):
 
 
 def test_only_the_last_backups_are_kept(conn, path):
-    for day in range(database.BACKUPS_KEPT + 5):
+    for day in range(BACKUPS_KEPT + 5):
         backup_database(path, START + timedelta(days=day))
 
     backups = sorted((path.parent / "backup").iterdir())
-    assert len(backups) == database.BACKUPS_KEPT
+    assert len(backups) == BACKUPS_KEPT
     assert backups[0].name == "offers_2026-10-26_0800.db"
     assert backups[-1].name == "offers_2026-11-24_0800.db"
 
