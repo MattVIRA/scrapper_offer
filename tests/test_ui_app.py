@@ -7,6 +7,7 @@ from streamlit.testing.v1 import AppTest
 
 from offers.__main__ import DEFAULT_CONFIG, DEFAULT_DB, UI_APP
 from offers.storage.database import connect
+from offers.ui.session import parse_args
 
 PAGES = {
     "app_pages/offers.py": "Offres",
@@ -58,8 +59,17 @@ def test_paths_are_read_once_per_session(monkeypatch, db_path, tmp_path):
     assert at.session_state["db_path"] == db_path
 
 
-def test_default_paths(monkeypatch):
-    # The pages do not open the database yet: the real one is not touched.
-    at = start(monkeypatch, [])
-    assert at.session_state["db_path"] == DEFAULT_DB
-    assert at.session_state["config_path"] == DEFAULT_CONFIG
+def test_default_paths():
+    # Without running the app: its first page would open the real database.
+    args = parse_args([])
+    assert (args.db, args.config) == (DEFAULT_DB, DEFAULT_CONFIG)
+
+
+def test_project_error_is_shown_in_the_page(monkeypatch, tmp_path):
+    not_a_database = tmp_path / "offers.db"
+    not_a_database.write_text("pas une base de données " * 100)
+
+    at = start(monkeypatch, ["--db", str(not_a_database)])
+
+    assert not at.exception
+    assert "Impossible d'utiliser la base" in at.error[0].value

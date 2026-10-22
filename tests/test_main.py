@@ -156,6 +156,8 @@ def test_ui_runs_streamlit_on_localhost(monkeypatch, capsys, tmp_path):
     ]
     assert cli.UI_APP.exists()
     assert "Ctrl+C pour l'arrêter" in capsys.readouterr().out
+    # The database is saved before the interface can change it.
+    assert len(list((tmp_path / "backup").iterdir())) == 1
 
 
 def test_ui_stops_quietly_on_ctrl_c(monkeypatch, capsys, tmp_path):

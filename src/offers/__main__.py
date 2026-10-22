@@ -12,6 +12,7 @@ from offers.exports.excel import write_workbook
 from offers.pipeline import run_collect
 from offers.sources import SOURCES, source_label
 from offers.storage.database import (
+    backup_database,
     connect,
     list_offers,
     probable_duplicates,
@@ -153,6 +154,8 @@ def ui(args):
     """Run the Streamlit interface until Ctrl+C."""
     if not args.db.exists():
         raise OffersError(f"Base introuvable : {args.db}. Lance d'abord python -m offers collect.")
+    # The interface writes the follow-up, and may migrate the database.
+    backup_database(args.db, datetime.now())
     print("Ouverture de l'interface dans le navigateur. Ctrl+C pour l'arrêter.")
     try:
         subprocess.run(streamlit_command(args.db, args.config), check=False)
