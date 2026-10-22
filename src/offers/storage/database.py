@@ -23,6 +23,7 @@ STORAGE_FILES = files("offers.storage")
 MIGRATIONS = [
     STORAGE_FILES.joinpath("schema.sql").read_text(encoding="utf-8"),
     STORAGE_FILES.joinpath("migrations", "002_tracking_ui.sql").read_text(encoding="utf-8"),
+    STORAGE_FILES.joinpath("migrations", "003_fewer_statuses.sql").read_text(encoding="utf-8"),
 ]
 
 

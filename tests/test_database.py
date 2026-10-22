@@ -89,7 +89,7 @@ def test_version_1_database_moves_to_version_2_without_loss(path):
         )
     conn.close()
 
-    conn = connect(path)
+    conn = connect(path, database.MIGRATIONS[:2])
     assert version(conn) == 2
     assert conn.execute("SELECT COUNT(*) FROM offers").fetchone()[0] == 4
     rows = conn.execute(
@@ -102,6 +102,41 @@ def test_version_1_database_moves_to_version_2_without_loss(path):
         (3, "applied", None, "2026-10-21", "Note 3", "avant", 0, None, 0),
         (4, None, None, "2026-10-21", "Note 4", "avant", 0, None, 0),
     ]
+
+
+def test_version_2_database_keeps_three_statuses(path):
+    conn = connect(path, database.MIGRATIONS[:2])
+    statuses = ["to_review", "interesting", "answered", "applied", "rejected", "not_for_me"]
+    for number, status in enumerate(statuses, 1):
+        conn.execute(
+            "INSERT INTO offers (source, source_id, reference, title, url, first_seen, "
+            "last_seen) VALUES ('fake', ?, ?, 'Data', 'https://example.com', 'a', 'b')",
+            (str(number), f"F{number}"),
+        )
+        conn.execute(
+            "INSERT INTO tracking (offer_id, status, letter_status, notes, favorite, "
+            "updated_at) VALUES (?, ?, 'to_write', ?, 1, 'avant')",
+            (number, status, f"Note {number}"),
+        )
+    conn.close()
+
+    conn = connect(path)
+    assert version(conn) == 3
+    rows = conn.execute(
+        "SELECT status, letter_status, notes, favorite, updated_at FROM tracking ORDER BY offer_id"
+    ).fetchall()
+    # À voir and Intéressant: no status; Réponse: applied; the rest is kept.
+    assert [row["status"] for row in rows] == [
+        None,
+        None,
+        "applied",
+        "applied",
+        "rejected",
+        "not_for_me",
+    ]
+    assert {tuple(row)[1:] for row in rows} == {
+        ("to_write", f"Note {n}", 1, "avant") for n in range(1, 7)
+    }
 
 
 def test_unreadable_file(path):

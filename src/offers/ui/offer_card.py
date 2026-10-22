@@ -85,16 +85,16 @@ def show_card(settings, stored, duplicates, action, editable=True, navigation=No
     """Show the card of a StoredOffer, in the current column.
 
     duplicates: references of its probable duplicates.
-    action: CardAction of the button at the bottom; it closes the card.
+    action: CardAction of the button at the top (« Mettre à la corbeille »,
+        « Restaurer »); the card then goes to the next offer shown.
     editable: False hides the favorite button (trash).
     navigation: Navigation for the arrows; None hides them (offer no
         longer shown, after a change of its status for example).
     The follow-up is shown apart, by show_follow_up_panel.
     """
     with st.container(border=True):
-        show_header(settings, stored, navigation, editable)
+        show_header(settings, stored, navigation, editable, action)
         show_summary(stored, duplicates)
-        show_action(settings, stored, action)
 
 
 def show_follow_up_panel(settings, stored, editable=True):
@@ -110,8 +110,8 @@ def show_follow_up_panel(settings, stored, editable=True):
             show_follow_up(stored)
 
 
-def show_header(settings, stored, navigation, editable):
-    """Title, « Fermer », arrows and the favorite button."""
+def show_header(settings, stored, navigation, editable, action):
+    """Title, « Fermer », arrows, then the favorite and action buttons."""
     with st.container(horizontal=True, vertical_alignment="center"):
         st.subheader(stored.offer.title)
         st.button(
@@ -124,8 +124,20 @@ def show_header(settings, stored, navigation, editable):
         )
     if navigation:
         show_arrows(settings, navigation)
-    if editable:
-        show_favorite_button(settings, stored)
+    with st.container(horizontal=True, vertical_alignment="center"):
+        if editable:
+            show_favorite_button(settings, stored)
+        show_action(settings, stored, action, following_offer(navigation))
+
+
+def following_offer(navigation):
+    """Return the offer to show once the card's offer leaves the list.
+
+    The next one below in the table, else the one above; None if alone.
+    """
+    if navigation is None:
+        return None
+    return navigation.next if navigation.next is not None else navigation.previous
 
 
 def show_favorite_button(settings, stored):
@@ -144,24 +156,28 @@ def switch_favorite(offer_id, favorite):
         set_favorite(conn, [offer_id], favorite, datetime.now())
 
 
-def show_action(settings, stored, action):
+def show_action(settings, stored, action, following_id):
     st.button(
         action.label,
         icon=action.icon,
         key=settings.state_key("card_action"),
         on_click=run_action,
-        args=(settings, action, stored.id),
+        args=(settings, action, stored.id, following_id),
     )
 
 
-def run_action(settings, action, offer_id):
-    """Callback of the button at the bottom of the card.
+def run_action(settings, action, offer_id, following_id):
+    """Callback of the action button: the offer leaves the list, the card
+    goes to following_id (or closes if None).
 
     A callback, because the action also unchecks the table, which can only
     be changed before it is drawn.
     """
     action.run([offer_id])
-    close_card(settings)
+    if following_id is None:
+        close_card(settings)
+    else:
+        open_card(settings, following_id)
 
 
 def go_to(settings, offer_id):

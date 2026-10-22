@@ -181,7 +181,6 @@ def test_counters_of_no_offer():
         # An offline offer keeps its color.
         ({"status": "rejected", "online": False}, browsing.MARKER_REJECTED),
         ({"favorite": True, "online": False}, browsing.MARKER_FAVORITE),
-        ({"status": "interesting"}, browsing.NO_MARKER),
         ({"status": "not_for_me"}, browsing.MARKER_NOT_FOR_ME),
         # Orange before yellow and grey.
         ({"status": "not_for_me", "favorite": True}, browsing.MARKER_NOT_FOR_ME),

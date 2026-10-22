@@ -297,7 +297,6 @@ def show_counters(shown):
     metrics = {
         "Offres": numbers.total,
         "Non lues": numbers.unread,
-        "À voir": numbers.by_status.get("to_review", 0),
         "Postulées": numbers.by_status.get("applied", 0),
         "Lettres à rédiger": numbers.letters_to_write,
     }

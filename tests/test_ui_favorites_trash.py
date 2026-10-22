@@ -36,7 +36,7 @@ def db_path(tmp_path):
     found = [FoundOffer(o, "A") for o in offers]
     save_source_result(conn, "business_france", found, offers[:2], lambda o: (1, "data"), NOW)
     ids = {s.offer.reference: s.id for s in list_offers(conn)}
-    save_follow_up(conn, ids["VIE1"], "interesting", "to_write", True, date(2026, 10, 21),
+    save_follow_up(conn, ids["VIE1"], "rejected", "to_write", True, date(2026, 10, 21),
                    "Relancer", NOW)  # fmt: skip
     save_follow_up(conn, ids["VIE2"], "applied", None, True, None, None, NOW)
     save_follow_up(conn, ids["VIE3"], "not_for_me", None, False, None, None, NOW)
@@ -133,7 +133,7 @@ def test_restored_offer_comes_back_with_its_follow_up(open_page, db_path, ids):
     assert titles(at) == ["Poste 2"]
     first = by_reference(db_path)["VIE1"]
     assert not first.hidden
-    assert (first.status, first.letter_status, first.favorite) == ("interesting", "to_write", True)
+    assert (first.status, first.letter_status, first.favorite) == ("rejected", "to_write", True)
     assert (first.applied_on, first.notes) == ("2026-10-21", "Relancer")
     assert "Poste 1" in titles(open_page(OFFERS))
     assert titles(open_page(FAVORITES)) == ["Poste 1"]

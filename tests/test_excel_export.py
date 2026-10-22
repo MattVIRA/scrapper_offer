@@ -137,7 +137,7 @@ def follow_up(conn, offers):
     now = moment(DAY_2)
     set_status(conn, [second], "applied", now)
     save_tracking_details(conn, second, date(2026, 10, 20), "Relancer lundi", now)
-    set_status(conn, [third], "interesting", now)
+    set_status(conn, [third], "not_for_me", now)
     set_letter_status(conn, [third], "to_write", now)
     set_favorite(conn, [third], True, now)
     hide(conn, [fourth], now)
@@ -228,7 +228,7 @@ def test_follow_up_comes_from_the_database(conn, path, offers):
     )
     assert (second["Lettre"], second["Favori"]) == (None, None)
     assert (third["Statut"], third["Lettre"], third["Favori"]) == (
-        "Intéressant",
+        "Pas pour moi",
         "À rédiger",
         "Oui",
     )

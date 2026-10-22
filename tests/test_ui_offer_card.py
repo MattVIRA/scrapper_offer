@@ -142,16 +142,37 @@ def test_form_shows_the_current_follow_up(start, db_path, ids):
     assert at.selectbox(key=field(ids, "VIE2", "status")).value == ""
 
 
-def test_trash_from_the_card_can_be_undone(start, db_path, ids):
+def test_trash_from_the_card_opens_the_next_offer(start, db_path, ids):
     at = start(ids["VIE1"])
     at.button(key="offers_card_action").click().run()
 
     assert by_reference(db_path)["VIE1"].hidden
-    assert CARD not in at.session_state
+    # The card shows the offer below in the table, now read.
+    assert at.session_state[CARD] == ids["VIE2"]
+    assert by_reference(db_path)["VIE2"].read_at is not None
     assert at.success[0].value == "1 offres mises à la corbeille"
 
     button(at, "Annuler").click().run()
     assert not by_reference(db_path)["VIE1"].hidden
+
+
+def test_trash_of_the_last_offer_opens_the_one_above(start, ids):
+    at = start(ids["VIE3"])
+    at.button(key="offers_card_action").click().run()
+    assert at.session_state[CARD] == ids["VIE2"]
+
+
+@pytest.mark.parametrize(
+    "navigation, expected",
+    [
+        (offer_card.Navigation(previous=10, next=30, position=2, total=3), 30),
+        (offer_card.Navigation(previous=20, next=None, position=3, total=3), 20),
+        (offer_card.Navigation(previous=None, next=None, position=1, total=1), None),
+        (None, None),
+    ],
+)
+def test_following_offer(navigation, expected):
+    assert offer_card.following_offer(navigation) == expected
 
 
 # --- Without Streamlit --------------------------------------------------------

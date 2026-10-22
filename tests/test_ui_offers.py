@@ -96,7 +96,6 @@ def test_page_shows_counters_and_table(at):
     assert metrics(at) == {
         "Offres": "3",
         "Non lues": "3",
-        "À voir": "0",
         "Postulées": "0",
         "Lettres à rédiger": "0",
     }
@@ -137,14 +136,14 @@ def test_status_saved_in_the_database_is_shown(at, db_path, ids):
 def test_group_status_only_changes_the_checked_offers(at, db_path, ids):
     at.session_state[SELECTED] = {ids["VIE1"], ids["VIE3"]}
     at.run()
-    at.menu_button(key="offers_status_menu").click("interesting").run()
+    at.menu_button(key="offers_status_menu").click("rejected").run()
 
     assert not at.exception
     stored = by_reference(db_path)
     assert {r: s.status for r, s in stored.items()} == {
-        "VIE1": "interesting",
+        "VIE1": "rejected",
         "VIE2": None,
-        "VIE3": "interesting",
+        "VIE3": "rejected",
         "VIE4": None,
     }
     # Everything is unchecked after an action.
@@ -304,7 +303,7 @@ def test_source_column_shows_the_label(at):
 
 
 def test_line_without_marker_keeps_the_default_color():
-    shown = [make_stored(1, status="interesting")]
+    shown = [make_stored(1)]
     frame = table_frame(shown, {})
     assert set(offer_table.row_styles(frame.iloc[0], offer_table.table_markers(shown))) == {""}
 
