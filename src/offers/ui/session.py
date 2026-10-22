@@ -4,7 +4,7 @@ import argparse
 from contextlib import contextmanager
 from pathlib import Path
 
-from offers.__main__ import DEFAULT_CONFIG, DEFAULT_DB
+from offers.__main__ import DEFAULT_CONFIG, DEFAULT_DB, DEFAULT_EXCEL
 from offers.storage.database import connect
 
 
@@ -13,6 +13,7 @@ def parse_args(argv):
     parser = argparse.ArgumentParser(prog="offers ui")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--excel", type=Path, default=DEFAULT_EXCEL)
     return parser.parse_args(argv)
 
 
@@ -23,6 +24,7 @@ def store_paths(state, argv):
     args = parse_args(argv)
     state.db_path = args.db
     state.config_path = args.config
+    state.excel_path = args.excel
 
 
 @contextmanager

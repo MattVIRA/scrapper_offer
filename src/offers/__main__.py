@@ -8,15 +8,10 @@ from pathlib import Path
 
 from offers.config import load_config
 from offers.errors import OffersError
-from offers.exports.excel import write_workbook
-from offers.pipeline import run_collect
+from offers.pipeline import export_workbook, run_collect
 from offers.sources import SOURCES, source_label
-from offers.storage.database import (
-    backup_database,
-    connect,
-    list_offers,
-    probable_duplicates,
-)
+from offers.storage.database import backup_database, connect, probable_duplicates
+from offers.summary import collect_summary, excel_summary
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = ROOT / "config.yaml"
@@ -60,6 +55,7 @@ def build_parser():
     )
     add_db_option(ui)
     add_config_option(ui)
+    add_excel_option(ui)
     return parser
 
 
@@ -94,38 +90,14 @@ def collect(args):
     """Run a collection and print its summary."""
     config = load_config(str(args.config), set(SOURCES))
     report = run_collect(config, str(args.db), str(args.excel), datetime.now())
-    for source in report.sources:
-        print(source_summary(source))
-    print(excel_summary(report.excel, args.excel))
-    if report.duplicates:
-        print(
-            f"{report.duplicates} doublons probables : python -m offers duplicates pour les voir."
-        )
-
-
-def source_summary(source):
-    """Return the summary line of one source."""
-    label = source_label(source.name)
-    if source.error:
-        return f"{label} : en erreur, ses offres ne changent pas. {source.error}"
-    saved = source.saved
-    return (
-        f"{label} : {saved.found} offres trouvées, "
-        f"{saved.added} nouvelles ajoutées ({saved.relevant} pertinentes), "
-        f"{saved.removed} passées « plus en ligne »."
-    )
-
-
-def excel_summary(report, path):
-    """Return the summary line of the Excel export."""
-    return f"Excel régénéré : {report.rows} offres (hors corbeille). Fichier : {path}"
+    for line in collect_summary(report, args.excel):
+        print(line)
 
 
 def export(args):
     """Write the Excel file again from the database and print the summary."""
     conn = open_existing_database(args.db)
-    report = write_workbook(str(args.excel), list_offers(conn), date.today())
-    print(excel_summary(report, args.excel))
+    print(excel_summary(export_workbook(conn, args.excel, date.today()), args.excel))
 
 
 def duplicates(args):
@@ -158,15 +130,15 @@ def ui(args):
     backup_database(args.db, datetime.now())
     print("Ouverture de l'interface dans le navigateur. Ctrl+C pour l'arrêter.")
     try:
-        subprocess.run(streamlit_command(args.db, args.config), check=False)
+        subprocess.run(streamlit_command(args.db, args.config, args.excel), check=False)
     except KeyboardInterrupt:
         # Streamlit receives the Ctrl+C too and stops on its own.
         pass
     print("Interface arrêtée.")
 
 
-def streamlit_command(db_path, config_path):
-    """Return the command that runs the interface on db_path and config_path."""
+def streamlit_command(db_path, config_path, excel_path):
+    """Return the command that runs the interface on these files."""
     return [
         sys.executable,
         "-m",
@@ -179,6 +151,8 @@ def streamlit_command(db_path, config_path):
         str(db_path),
         "--config",
         str(config_path),
+        "--excel",
+        str(excel_path),
     ]
 
 

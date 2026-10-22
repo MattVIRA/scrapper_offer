@@ -28,6 +28,8 @@ ruff format .                   # mettre en forme (ruff format --check . pour v�
 
 Options : `--db` (défaut `data/offers.db`) et `--excel` (défaut
 `output/offres_vie.xlsx`) ; `collect` et `ui` prennent aussi `--config`.
+`ui` passe les trois chemins à l'interface, qui peut lancer une collecte
+(page Collecte, dans un fil de fond) et exporter l'Excel.
 
 `offers ui` (ou `python -m offers ui`) marche dans le `.venv` activé.
 Pour la lancer sans l'activer, alias facultatif dans `~/.zshrc` :
@@ -95,6 +97,10 @@ sans accord sur ses fichiers. Les tests suffisent pour vérifier.
   de candidature, notes) n'est écrite que par l'interface, à partir des
   saisies de l'utilisateur ; la collecte n'y touche jamais.
 - Une offre n'est jamais supprimée : la corbeille la masque.
+- Excel ouvert pendant une collecte : la collecte se fait quand même,
+  seul l'export est sauté et signalé dans le bilan. Les textes du bilan
+  sont dans `summary.py`, partagés par la ligne de commande et
+  l'interface.
 - Écriture atomique : fichier temporaire, puis remplacement (Excel) ;
   une transaction par écriture (base, via `database.transaction`).
 - Sauvegarde avant chaque modification : l'Excel dans `output/backup/`,

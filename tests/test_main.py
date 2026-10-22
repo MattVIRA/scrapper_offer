@@ -93,6 +93,22 @@ def test_collect_shows_the_duplicates(monkeypatch, capsys, paths):
     assert output.endswith("1 doublons probables : python -m offers duplicates pour les voir.\n")
 
 
+def test_collect_with_the_excel_open(monkeypatch, capsys, paths, tmp_path):
+    monkeypatch.setitem(registry.SOURCES, "fake", WorkingSource)
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "~$offres.xlsx").touch()
+
+    assert cli.main(["collect", *paths]) == 0
+    output = capsys.readouterr().out.splitlines()
+    assert output[0].startswith("Fausse source : 1 offres trouvées")
+    assert output[1] == (
+        "Export Excel non fait, la collecte est enregistrée. offres.xlsx est ouvert : "
+        "ferme l'Excel puis relance. Ensuite : bouton « Exporter l'Excel » ou "
+        "python -m offers export."
+    )
+    assert not (tmp_path / "out" / "offres.xlsx").exists()
+
+
 def test_command_is_required(capsys):
     with pytest.raises(SystemExit):
         cli.main([])
@@ -137,7 +153,8 @@ def test_ui_runs_streamlit_on_localhost(monkeypatch, capsys, tmp_path):
     run = FakeRun()
     monkeypatch.setattr(cli.subprocess, "run", run)
 
-    assert cli.main(["ui", "--db", str(db), "--config", str(config)]) == 0
+    excel = tmp_path / "offres.xlsx"
+    assert cli.main(["ui", "--db", str(db), "--config", str(config), "--excel", str(excel)]) == 0
     assert run.commands == [
         [
             cli.sys.executable,
@@ -152,6 +169,8 @@ def test_ui_runs_streamlit_on_localhost(monkeypatch, capsys, tmp_path):
             str(db),
             "--config",
             str(config),
+            "--excel",
+            str(excel),
         ]
     ]
     assert cli.UI_APP.exists()

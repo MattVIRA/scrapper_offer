@@ -143,15 +143,32 @@ def test_no_enabled_source(db, path):
         run_collect(CONFIG, db, path, DAY_1)
 
 
-def test_open_excel_stops_before_anything(collect, db, path):
+def test_open_excel_only_skips_the_export(collect, db, path):
     os.makedirs(os.path.dirname(path))
     open(os.path.join(os.path.dirname(path), "~$offres_vie.xlsx"), "w").close()
     source = FakeSource(found=[offer(1)], online=[offer(1)])
 
-    with pytest.raises(excel.ExcelError, match="est ouvert"):
-        collect(DAY_1, source)
-    assert source.calls == 0
-    assert not os.path.exists(db)
+    report = collect(DAY_1, source)
+
+    # The collection is done and saved; only the export is skipped.
+    assert source.calls > 0
+    assert online_in_db(db) == {"fake-1": True}
+    assert report.excel is None
+    assert "est ouvert" in report.excel_error
+    assert not os.path.exists(path)
+
+
+def test_each_source_is_reported_as_soon_as_it_is_read(db, path):
+    done = []
+    sources = [
+        FakeSource(found=[offer(1, "a")], online=None, name="a"),
+        FakeSource(error=OffersError("panne"), name="b"),
+    ]
+
+    report = run_collect(CONFIG, db, path, DAY_1, sources=sources, on_source_done=done.append)
+
+    assert [(r.name, r.error) for r in done] == [("a", None), ("b", "panne")]
+    assert done == report.sources
 
 
 def test_two_runs_add_no_duplicate(collect, db, path):
