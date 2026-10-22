@@ -169,8 +169,6 @@ def test_page_settings():
     trash = PageSettings(key="trash", title="Corbeille", in_trash=True)
     offers = PageSettings(key="offers", title="Offres")
 
-    assert trash.editable_columns() == {offer_table.CHOOSE}
-    assert offers.editable_columns() == {offer_table.CHOOSE, offer_table.STATUS}
     assert trash.default_online() == browsing.ALL
     assert offers.default_statuses() == browsing.DEFAULT_STATUSES
     assert "not_for_me" in trash.default_statuses()

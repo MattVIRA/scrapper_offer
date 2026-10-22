@@ -54,12 +54,14 @@ lancer sans accord sur ses fichiers. Les tests suffisent pour vérifier.
 
 **Tester l'interface.** `AppTest` (`streamlit.testing.v1`), sans
 navigateur, sur une base dans `tmp_path`, jamais la vraie (ne pas lancer
-l'app sans `--db`). `AppTest` ne sait ni cocher une case ni changer une
-cellule d'un `st.data_editor`, ni cliquer un `ButtonColumn` : les offres
-cochées sont dans `st.session_state["<page>_selected"]`, la fiche
-ouverte dans `"<page>_card"` (les tests les remplissent), et les
-modifications du tableau passent par `offer_table.apply_table_changes`,
-testée avec pytest. Ces gestes sont à faire vérifier par l'utilisateur.
+l'app sans `--db`). `AppTest` ne sait ni cocher une ligne ni cliquer une
+cellule d'un `st.dataframe` : les offres cochées sont dans
+`st.session_state["<page>_selected"]`, la fiche ouverte dans
+`"<page>_card"` (les tests les remplissent), et le décodage d'un clic
+passe par `offer_table.read_selection`, testée avec pytest. Ces gestes
+sont à faire vérifier par l'utilisateur. Un bouton qui modifie l'état
+d'un widget déjà affiché (décocher le tableau) passe par un rappel
+(`on_click`), exécuté avant l'affichage.
 La logique sans Streamlit (`browsing.py`, `summary.py`) se teste avec
 pytest seul.
 

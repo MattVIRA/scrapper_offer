@@ -1,22 +1,23 @@
 """Tests of the « Offres » page and of its shared table module.
 
-AppTest cannot tick a box, change a cell or click a row button of
-st.data_editor: the checked offers are set in the session state, and the
-table changes are tested through apply_table_changes.
+AppTest cannot check a row nor click a cell of st.dataframe: the checked
+offers and the open card are set in the session state, and the decoding
+of a click is tested through read_selection.
 """
 
 import sys
 from datetime import date, datetime
 
+import pandas as pd
 import pytest
 from streamlit.testing.v1 import AppTest
 
 from offers import browsing
 from offers.__main__ import UI_APP
 from offers.sources.base import FoundOffer
-from offers.storage.database import connect, list_offers, save_source_result
+from offers.storage.database import connect, list_offers, save_source_result, set_status
 from offers.ui import labels, offer_table
-from offers.ui.offer_table import PageSettings, apply_table_changes, make_filter, table_frame
+from offers.ui.offer_table import PageSettings, make_filter, read_selection, table_frame
 from tests.factories import make_offer, make_stored
 
 NOW = datetime(2026, 10, 22, 9, 30)
@@ -122,11 +123,11 @@ def test_no_offer_left(at):
 
 def test_status_saved_in_the_database_is_shown(at, db_path, ids):
     conn = connect(db_path)
-    apply_table_changes(conn, [ids["VIE1"]], {0: {offer_table.STATUS: "applied"}}, set(), NOW)
+    set_status(conn, [ids["VIE1"]], "applied", NOW)
     conn.close()
 
     at.run()
-    assert table(at)[offer_table.STATUS][0] == "applied"
+    assert table(at)[offer_table.STATUS][0] == "Postulé"
     assert table(at)[offer_table.MARKER][0] == browsing.MARKER_APPLIED
     assert metrics(at)["Postulées"] == "1"
 
@@ -149,7 +150,8 @@ def test_group_status_only_changes_the_checked_offers(at, db_path, ids):
     }
     # Everything is unchecked after an action.
     assert at.session_state[SELECTED] == set()
-    assert not any(table(at)[offer_table.CHOOSE])
+    # The boxes of the table are unchecked too.
+    assert at.session_state[at.session_state["offers_table_key"]]["selection"]["rows"] == []
 
 
 def test_group_letter_and_favorite(at, db_path, ids):
@@ -229,11 +231,11 @@ def test_table_frame():
     )
     second = make_stored(2, online=False)
 
-    frame = table_frame([first, second], {1: ["REF7", "REF8"]}, selected={2})
+    frame = table_frame([first, second], {1: ["REF7", "REF8"]})
 
+    # Read-only lines: no box nor button column, the status as a label.
     assert list(frame.columns) == offer_table.COLUMNS
     assert frame.to_dict("records")[0] | {"Publiée le": None} == {
-        offer_table.CHOOSE: False,
         offer_table.MARKER: browsing.MARKER_REJECTED,
         offer_table.UNREAD: False,
         offer_table.DUPLICATE: "REF7, REF8",
@@ -245,47 +247,58 @@ def test_table_frame():
         "Durée": 12,
         "Publiée le": None,
         "Ajoutée le": date(2026, 10, 20),
-        offer_table.STATUS: "rejected",
+        offer_table.STATUS: "Refusé",
         "Lettre": "Rédigée",
         "Favori": offer_table.FAVORITE_MARK,
         "En ligne": True,
-        offer_table.OPEN: offer_table.OPEN_LABEL,
     }
     row = frame.to_dict("records")[1]
-    assert row[offer_table.CHOOSE] and row[offer_table.UNREAD]
+    assert row[offer_table.UNREAD] and pd.isna(row[offer_table.STATUS])
     assert (row[offer_table.MARKER], row["En ligne"]) == (browsing.MARKER_OFFLINE, False)
     assert row[offer_table.DUPLICATE] == "" and row["Favori"] == ""
 
 
 def test_no_yellow_in_the_favorites_table():
     favorite = make_stored(1, favorite=True)
-    frame = table_frame([favorite], {}, set(), on_favorites_page=True)
+    frame = table_frame([favorite], {}, on_favorites_page=True)
     assert frame[offer_table.MARKER][0] == browsing.NO_MARKER
 
 
-def test_apply_table_changes(db_path, ids):
-    conn = connect(db_path)
-    rows = [ids["VIE3"], ids["VIE1"], ids["VIE2"]]
-    edited = {
-        0: {offer_table.CHOOSE: True},
-        1: {offer_table.STATUS: "applied", offer_table.CHOOSE: True},
-        "2": {offer_table.CHOOSE: False},
-    }
+@pytest.mark.parametrize(
+    "changes, color",
+    [
+        ({"status": "rejected"}, "#FDE2E1"),
+        ({"status": "applied"}, "#DBEAFE"),
+        ({"favorite": True}, "#FEF3C7"),
+        ({"online": False}, "#E5E7EB"),
+        ({"status": "rejected", "favorite": True}, "#FDE2E1"),
+    ],
+)
+def test_whole_line_takes_the_color_of_its_marker(changes, color):
+    frame = table_frame([make_stored(1, **changes)], {})
+    styles = offer_table.row_styles(frame.iloc[0])
+    assert len(styles) == len(offer_table.COLUMNS)
+    assert all(f"background-color: {color}" in style for style in styles)
 
-    selected = apply_table_changes(conn, rows, edited, {ids["VIE2"], ids["VIE4"]}, NOW)
-    conn.close()
 
-    assert selected == {ids["VIE3"], ids["VIE1"], ids["VIE4"]}
-    stored = by_reference(db_path)
-    assert (stored["VIE1"].status, stored["VIE3"].status) == ("applied", None)
+def test_line_without_marker_keeps_the_default_color():
+    frame = table_frame([make_stored(1, status="interesting")], {})
+    assert set(offer_table.row_styles(frame.iloc[0])) == {""}
 
 
-def test_status_cleared_in_the_table(db_path, ids):
-    conn = connect(db_path)
-    apply_table_changes(conn, [ids["VIE1"]], {0: {offer_table.STATUS: "applied"}}, set(), NOW)
-    apply_table_changes(conn, [ids["VIE1"]], {0: {offer_table.STATUS: None}}, set(), NOW)
-    conn.close()
-    assert by_reference(db_path)["VIE1"].status is None
+def test_read_selection():
+    rows = [30, 10, 20]
+    assert read_selection(rows, [0, 2], []) == ({30, 20}, None)
+    # A click on a cell opens the offer of its line.
+    assert read_selection(rows, [1], [(2, "Titre")]) == ({10}, 20)
+    assert read_selection(rows, [], []) == (set(), None)
+
+
+def test_table_key_changes_with_the_lines():
+    first = offer_table.table_key(PAGE, [1, 2, 3])
+    assert first == offer_table.table_key(PAGE, [1, 2, 3])
+    assert first != offer_table.table_key(PAGE, [1, 3])
+    assert first.startswith("offers_table_")
 
 
 def test_make_filter_without_choice_filters_nothing():

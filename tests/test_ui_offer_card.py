@@ -115,7 +115,7 @@ def test_follow_up_is_saved_by_the_form(start, db_path, ids):
     assert (first.status, first.letter_status, first.favorite) == ("applied", "written", True)
     assert (first.applied_on, first.notes) == ("2026-10-21", "Relancer lundi")
     assert CARD not in at.session_state
-    assert table(at)[offer_table.STATUS][0] == "applied"
+    assert table(at)[offer_table.STATUS][0] == "Postulé"
 
 
 def test_nothing_is_written_before_saving(start, db_path, ids):
@@ -186,3 +186,54 @@ def test_applied_on_to_save(chosen, stored_text, expected):
 
 def test_card_key_belongs_to_the_page():
     assert offer_card.card_key(PageSettings(key="favorites", title="Favoris")) == "favorites_card"
+
+
+# --- Arrows -------------------------------------------------------------------
+
+
+def test_arrows_go_to_the_next_and_previous_offers(start, db_path, ids):
+    at = start(ids["VIE1"])
+    assert "1 / 3" in texts(at.caption)
+    assert at.button(key="offers_card_previous").disabled
+
+    at.button(key="offers_card_next").click().run()
+
+    assert at.session_state[CARD] == ids["VIE2"]
+    assert "2 / 3" in texts(at.caption)
+    # The offer reached is read.
+    assert by_reference(db_path)["VIE2"].read_at is not None
+
+    at.button(key="offers_card_previous").click().run()
+    assert at.session_state[CARD] == ids["VIE1"]
+
+
+def test_last_offer_has_no_next(start, ids):
+    at = start(ids["VIE3"])
+    assert "3 / 3" in texts(at.caption)
+    assert at.button(key="offers_card_next").disabled
+    assert not at.button(key="offers_card_previous").disabled
+
+
+def test_arrows_follow_the_filters(start, ids):
+    at = start(ids["VIE2"])
+    at.text_input(key="offers_text").set_value("comptable").run()
+    assert "1 / 2" in texts(at.caption)
+    at.button(key="offers_card_next").click().run()
+    assert at.session_state[CARD] == ids["VIE3"]
+
+
+@pytest.mark.parametrize(
+    "offer_id, expected",
+    [
+        (20, offer_card.Navigation(previous=10, next=30, position=2, total=3)),
+        (10, offer_card.Navigation(previous=None, next=20, position=1, total=3)),
+        (30, offer_card.Navigation(previous=20, next=None, position=3, total=3)),
+        (99, None),
+    ],
+)
+def test_navigation(offer_id, expected):
+    assert offer_card.navigation([10, 20, 30], offer_id) == expected
+
+
+def texts(elements):
+    return [element.value for element in elements]

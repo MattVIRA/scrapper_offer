@@ -40,6 +40,30 @@ class CardAction:
     run: Callable
 
 
+@dataclass(frozen=True)
+class Navigation:
+    """Place of the card's offer among the offers shown, for the arrows."""
+
+    previous: int | None
+    next: int | None
+    # From 1.
+    position: int
+    total: int
+
+
+def navigation(shown_ids, offer_id):
+    """Return the Navigation of an offer in the list shown; None if not in it."""
+    if offer_id not in shown_ids:
+        return None
+    index = shown_ids.index(offer_id)
+    return Navigation(
+        previous=shown_ids[index - 1] if index > 0 else None,
+        next=shown_ids[index + 1] if index + 1 < len(shown_ids) else None,
+        position=index + 1,
+        total=len(shown_ids),
+    )
+
+
 def card_key(settings):
     """Session state key holding the id of the offer whose card is open."""
     return settings.state_key("card")
@@ -53,12 +77,14 @@ def close_card(settings):
     st.session_state.pop(card_key(settings), None)
 
 
-def show_card(settings, stored, duplicates, action, editable=True):
+def show_card(settings, stored, duplicates, action, editable=True, navigation=None):
     """Open the card of a StoredOffer.
 
     duplicates: references of its probable duplicates.
     action: CardAction of the button at the bottom; it closes the card.
     editable: False shows the follow-up without the form (trash).
+    navigation: Navigation for the arrows; None hides them (offer no
+        longer shown, after a change of its status for example).
     """
     dialog = st.dialog(
         stored.offer.title,
@@ -66,19 +92,64 @@ def show_card(settings, stored, duplicates, action, editable=True):
         position="right",
         on_dismiss=partial(close_card, settings),
     )
-    dialog(card_body)(settings, stored, duplicates, action, editable)
+    dialog(card_body)(settings, stored, duplicates, action, editable, navigation)
 
 
-def card_body(settings, stored, duplicates, action, editable):
+def card_body(settings, stored, duplicates, action, editable, navigation):
+    if navigation:
+        show_arrows(settings, navigation)
     show_summary(stored, duplicates)
     if editable:
         show_follow_up_form(settings, stored)
     else:
         show_follow_up(stored)
-    if st.button(action.label, icon=action.icon, key=settings.state_key("card_action")):
-        action.run([stored.id])
-        close_card(settings)
-        st.rerun()
+    st.button(
+        action.label,
+        icon=action.icon,
+        key=settings.state_key("card_action"),
+        on_click=run_action,
+        args=(settings, action, stored.id),
+    )
+
+
+def run_action(settings, action, offer_id):
+    """Callback of the button at the bottom of the card.
+
+    A callback, because the action also unchecks the table, which can only
+    be changed before it is drawn.
+    """
+    action.run([offer_id])
+    close_card(settings)
+    # The whole page, not only the card, runs again.
+    st.rerun()
+
+
+def go_to(settings, offer_id):
+    """Callback of an arrow: the whole page runs again with the other offer."""
+    open_card(settings, offer_id)
+    st.rerun()
+
+
+def show_arrows(settings, navigation):
+    """Buttons to the previous and next offers shown, and the position."""
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.button(
+            "Précédente",
+            icon=":material/chevron_left:",
+            disabled=navigation.previous is None,
+            key=settings.state_key("card_previous"),
+            on_click=go_to,
+            args=(settings, navigation.previous),
+        )
+        st.caption(f"{navigation.position} / {navigation.total}")
+        st.button(
+            "Suivante",
+            icon=":material/chevron_right:",
+            disabled=navigation.next is None,
+            key=settings.state_key("card_next"),
+            on_click=go_to,
+            args=(settings, navigation.next),
+        )
 
 
 def show_summary(stored, duplicates):
