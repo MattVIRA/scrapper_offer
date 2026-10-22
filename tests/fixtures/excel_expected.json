@@ -5,7 +5,7 @@
   "filtre": "A1:Q5",
   "listes": [
    {
-    "formule": "\"À voir,Intéressant,À rédiger,Lettre prête,Postulé,Réponse,Refusé,Pas pour moi\"",
+    "formule": "\"À voir,Intéressant,Postulé,Réponse,Refusé,Pas pour moi\"",
     "plage": "O2:O20000"
    }
   ],

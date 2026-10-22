@@ -245,7 +245,7 @@ def test_sync_changed_status_note_and_date(imported, path, offers):
             (first, "Statut"): "Refusé",
             (first, "Postulé le"): datetime(2026, 10, 21),
             (first, "Notes"): "Pas retenu",
-            (third, "Statut"): "À rédiger",
+            (third, "Statut"): "Réponse",
         },
     )
     report = sync_tracking(imported, path, LATER)
@@ -256,7 +256,7 @@ def test_sync_changed_status_note_and_date(imported, path, offers):
         "2026-10-21",
         "Pas retenu",
     )
-    assert result[third].status == "to_write"
+    assert result[third].status == "answered"
     assert report.updated == 2
 
 

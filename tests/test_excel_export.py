@@ -230,9 +230,7 @@ def test_file_creation(conn, path, offers):
 
     lists = sheet.data_validations.dataValidation
     assert len(lists) == 1
-    assert lists[0].formula1 == (
-        '"À voir,Intéressant,À rédiger,Lettre prête,Postulé,Réponse,Refusé,Pas pour moi"'
-    )
+    assert lists[0].formula1 == '"À voir,Intéressant,Postulé,Réponse,Refusé,Pas pour moi"'
 
     assert sheet.cell(row=2, column=12).hyperlink.target == offers[0].url
     # No backup: there was nothing to save.
@@ -365,11 +363,12 @@ def test_empty_source_is_filled_on_existing_rows(conn, path, offers):
 # --- 3. Export from the database ---------------------------------------------
 
 
-def test_old_status_list_is_replaced_but_not_a_list_added_by_hand(conn, path, offers):
+@pytest.mark.parametrize("old_formula", excel.OLD_STATUS_FORMULAS)
+def test_old_status_list_is_replaced_but_not_a_list_added_by_hand(conn, path, offers, old_formula):
     run(conn, path, DAY_1, offers[:2])
     workbook = load_workbook(path)
     sheet = workbook.active
-    sheet.data_validations.dataValidation[0].formula1 = excel.OLD_STATUS_FORMULAS[0]
+    sheet.data_validations.dataValidation[0].formula1 = old_formula
     by_hand = DataValidation(type="list", formula1='"Oui,Non"')
     by_hand.add("T2:T100")
     sheet.add_data_validation(by_hand)

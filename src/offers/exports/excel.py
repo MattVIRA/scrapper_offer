@@ -41,8 +41,11 @@ USER_COLUMNS = ["Statut", "Postulé le", "Notes"]
 
 STATUS_CHOICES = list(STATUSES.values())
 STATUS_FORMULA = '"' + ",".join(STATUS_CHOICES) + '"'
-# Drop-down list set by the program in lot 1, replaced by the current one.
-OLD_STATUS_FORMULAS = ['"À voir,Intéressant,Postulé,Refusé,Pas pour moi"']
+# Drop-down lists set by the program in lots 1 and 2, replaced by the current one.
+OLD_STATUS_FORMULAS = [
+    '"À voir,Intéressant,Postulé,Refusé,Pas pour moi"',
+    '"À voir,Intéressant,À rédiger,Lettre prête,Postulé,Réponse,Refusé,Pas pour moi"',
+]
 ONLINE = "Oui"
 NO_LONGER_ONLINE = "Plus en ligne"
 LINK_TEXT = "Ouvrir l'offre"

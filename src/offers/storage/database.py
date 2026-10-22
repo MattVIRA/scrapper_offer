@@ -13,12 +13,15 @@ from pathlib import Path
 from offers.errors import OffersError
 from offers.model import Offer
 from offers.scoring.keywords import normalize
+from offers.tracking import LETTER_STATUSES, STATUSES
 
+STORAGE_FILES = files("offers.storage")
 # Schema changes, applied in order. The schema version stored in
 # PRAGMA user_version is the number of migrations already applied: never
 # change or remove one, add a new one at the end.
 MIGRATIONS = [
-    files("offers.storage").joinpath("schema.sql").read_text(encoding="utf-8"),
+    STORAGE_FILES.joinpath("schema.sql").read_text(encoding="utf-8"),
+    STORAGE_FILES.joinpath("migrations", "002_tracking_ui.sql").read_text(encoding="utf-8"),
 ]
 
 
@@ -67,6 +70,12 @@ class StoredOffer:
     status: str | None
     applied_on: str | None
     notes: str | None
+    letter_status: str | None
+    favorite: bool
+    # None: the offer was never opened.
+    read_at: datetime | None
+    # In the trash.
+    hidden: bool
 
 
 @dataclass(frozen=True)
@@ -292,6 +301,76 @@ def save_tracking(conn, offer_id, status, applied_on, notes, now):
         ) from err
 
 
+def set_status(conn, offer_ids, status, now):
+    """Set the status of the offers; None removes it."""
+    check_code(status, STATUSES)
+    update_tracking(conn, offer_ids, {"status": status}, now)
+
+
+def set_letter_status(conn, offer_ids, letter_status, now):
+    """Set the letter status of the offers; None means no letter."""
+    check_code(letter_status, LETTER_STATUSES)
+    update_tracking(conn, offer_ids, {"letter_status": letter_status}, now)
+
+
+def set_favorite(conn, offer_ids, favorite, now):
+    """Add the offers to the favorites, or remove them."""
+    update_tracking(conn, offer_ids, {"favorite": int(favorite)}, now)
+
+
+def mark_read(conn, offer_ids, now):
+    """Mark the offers as read; an offer already read keeps its read_at."""
+    update_tracking(conn, offer_ids, {"read_at": to_text(now)}, now, only_if="read_at IS NULL")
+
+
+def hide(conn, offer_ids, now):
+    """Put the offers in the trash; they are never deleted."""
+    update_tracking(conn, offer_ids, {"hidden": 1}, now)
+
+
+def restore(conn, offer_ids, now):
+    """Take the offers out of the trash."""
+    update_tracking(conn, offer_ids, {"hidden": 0}, now)
+
+
+def save_tracking_details(conn, offer_id, applied_on, notes, now):
+    """Write the application date and the notes of an offer.
+
+    applied_on: date, or None. Empty notes are stored as None.
+    """
+    update_tracking(
+        conn, [offer_id], {"applied_on": to_text(applied_on), "notes": notes or None}, now
+    )
+
+
+def check_code(code, codes):
+    """Refuse a code that is neither None nor one of codes."""
+    if code is not None and code not in codes:
+        raise ValueError(f"Code inconnu : {code!r} (attendu : {', '.join(codes)} ou None)")
+
+
+def update_tracking(conn, offer_ids, fields, now, only_if=None):
+    """Write fields ({column: value}) in the tracking of the offers.
+
+    Create the missing tracking rows; all offers are written, or none.
+    only_if: SQL condition; rows that do not meet it are left unchanged.
+    """
+    values = {**fields, "updated_at": to_text(now)}
+    assignments = ", ".join(f"{column} = ?" for column in values)
+    condition = f" AND {only_if}" if only_if else ""
+    with transaction(conn, "Impossible d'enregistrer le suivi, rien n'a été modifié"):
+        for offer_id in offer_ids:
+            conn.execute(
+                "INSERT INTO tracking (offer_id, updated_at) VALUES (?, ?) "
+                "ON CONFLICT (offer_id) DO NOTHING",
+                (offer_id, to_text(now)),
+            )
+            conn.execute(
+                f"UPDATE tracking SET {assignments} WHERE offer_id = ?{condition}",
+                [*values.values(), offer_id],
+            )
+
+
 def count_offers(conn):
     """Return the number of stored offers."""
     try:
@@ -312,7 +391,8 @@ def list_offers(conn):
     """Return all offers as StoredOffer, by first_seen then id."""
     try:
         rows = conn.execute(
-            "SELECT o.*, t.status, t.applied_on, t.notes, "
+            "SELECT o.*, t.status, t.applied_on, t.notes, t.letter_status, t.favorite, "
+            "t.read_at, t.hidden, "
             "e.score, e.justification AS words "
             "FROM offers o "
             "LEFT JOIN tracking t ON t.offer_id = o.id "
@@ -339,6 +419,11 @@ def stored_offer(row):
         status=row["status"],
         applied_on=row["applied_on"],
         notes=row["notes"],
+        letter_status=row["letter_status"],
+        # No tracking row: not a favorite, not read, not hidden.
+        favorite=bool(row["favorite"]),
+        read_at=datetime.fromisoformat(row["read_at"]) if row["read_at"] else None,
+        hidden=bool(row["hidden"]),
     )
 
 
