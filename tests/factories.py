@@ -1,10 +1,11 @@
 """Builders of test objects."""
 
-from datetime import date
+from datetime import date, datetime
 
 from offers.config import SourceConfig
 from offers.model import Offer
 from offers.sources.base import FoundOffer, Source
+from offers.storage.database import StoredOffer
 
 
 def make_offer(**changes):
@@ -27,6 +28,29 @@ def make_offer(**changes):
     }
     values.update(changes)
     return Offer(**values)
+
+
+def make_stored(id=1, offer=None, **changes):
+    """Return a StoredOffer, online and without follow-up, with the given fields changed."""
+    values = {
+        "id": id,
+        "offer": offer or make_offer(source_id=str(id), reference=f"REF{id}"),
+        "search_name": "A",
+        "first_seen": datetime(2026, 10, 20, 8, 0),
+        "last_seen": datetime(2026, 10, 20, 8, 0),
+        "online": True,
+        "score": None,
+        "words": None,
+        "status": None,
+        "applied_on": None,
+        "notes": None,
+        "letter_status": None,
+        "favorite": False,
+        "read_at": None,
+        "hidden": False,
+    }
+    values.update(changes)
+    return StoredOffer(**values)
 
 
 class FakeSource(Source):

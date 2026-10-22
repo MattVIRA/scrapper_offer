@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from offers.errors import OffersError
-from offers.exports.excel import ExcelReport, check_file_closed, update_workbook
+from offers.exports.excel import ExcelReport, check_file_closed, write_workbook
 from offers.scoring.keywords import KeywordScorer
 from offers.sources import create_source
 from offers.storage.database import (
@@ -16,7 +16,6 @@ from offers.storage.database import (
     record_run,
     save_source_result,
 )
-from offers.storage.excel_import import SyncReport, sync_tracking
 
 
 @dataclass(frozen=True)
@@ -33,7 +32,6 @@ class CollectReport:
     """Summary of a collection, shown to the user."""
 
     sources: list[SourceReport]
-    sync: SyncReport
     excel: ExcelReport
     # Number of groups of probable duplicates.
     duplicates: int = 0
@@ -65,12 +63,11 @@ def run_collect(config, db_path, excel_path, now, sources=None, clock=datetime.n
             raise OffersError(
                 f"Aucune source n'a pu être lue. L'Excel n'est pas modifié.\n{details}"
             )
-        sync = sync_tracking(conn, excel_path, now)
-        excel_report = update_workbook(excel_path, list_offers(conn), now.date())
+        excel_report = write_workbook(excel_path, list_offers(conn), now.date())
         duplicates = len(probable_duplicates(conn))
     finally:
         conn.close()
-    return CollectReport(sources=reports, sync=sync, excel=excel_report, duplicates=duplicates)
+    return CollectReport(sources=reports, excel=excel_report, duplicates=duplicates)
 
 
 def collect_source(conn, source, score, now, clock):

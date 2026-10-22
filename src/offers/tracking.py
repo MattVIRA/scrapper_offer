@@ -13,17 +13,11 @@ STATUSES = {
     "rejected": "Refusé",
     "not_for_me": "Pas pour moi",
 }
-CODES_BY_LABEL = {label: code for code, label in STATUSES.items()}
 # No letter status means no letter planned.
 LETTER_STATUSES = {
     "to_write": "À rédiger",
     "written": "Rédigée",
 }
-
-
-def status_code(label):
-    """Return the code of a status label; None if the label is unknown."""
-    return CODES_BY_LABEL.get(label.strip())
 
 
 def status_label(code):

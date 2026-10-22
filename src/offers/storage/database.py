@@ -187,22 +187,6 @@ def first_search_of_each_offer(found):
     return result
 
 
-def find_offer_id(conn, source_name, source_id):
-    """Return the id of a stored offer, or None."""
-    row = conn.execute(
-        "SELECT id FROM offers WHERE source = ? AND source_id = ?", (source_name, source_id)
-    ).fetchone()
-    return row["id"] if row else None
-
-
-def find_offer_id_by_reference(conn, source_name, reference):
-    """Return the id of a stored offer from its reference, or None."""
-    row = conn.execute(
-        "SELECT id FROM offers WHERE source = ? AND reference = ?", (source_name, reference)
-    ).fetchone()
-    return row["id"] if row else None
-
-
 def known_offer_ids(conn, source_name):
     """Return {source_id: id} of the offers of a source already stored."""
     rows = conn.execute("SELECT id, source_id FROM offers WHERE source = ?", (source_name,))
@@ -217,19 +201,10 @@ def offer_values(offer):
     return [*values, json.dumps(offer.raw, ensure_ascii=False)]
 
 
-def insert_offer(conn, offer, search_name, now, first_seen=None, online=True):
-    """Add an offer; return its id.
-
-    first_seen: when the offer was first seen, if before now.
-    """
+def insert_offer(conn, offer, search_name, now):
+    """Add an offer, seen online now; return its id."""
     columns = [*OFFER_COLUMNS, "raw", "search_name", "first_seen", "last_seen", "online"]
-    values = [
-        *offer_values(offer),
-        search_name,
-        to_text(first_seen or now),
-        to_text(now),
-        int(online),
-    ]
+    values = [*offer_values(offer), search_name, to_text(now), to_text(now), 1]
     cursor = conn.execute(
         f"INSERT INTO offers ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
         values,
@@ -279,26 +254,6 @@ def mark_offline(conn, source_name, online_ids):
 def load_tracking(conn, offer_id):
     """Return the tracking row of an offer, or None."""
     return conn.execute("SELECT * FROM tracking WHERE offer_id = ?", (offer_id,)).fetchone()
-
-
-def save_tracking(conn, offer_id, status, applied_on, notes, now):
-    """Write the user's follow-up of an offer, replacing the previous one.
-
-    status: code of offers.tracking.STATUSES, or None.
-    """
-    try:
-        conn.execute(
-            "INSERT INTO tracking (offer_id, status, applied_on, notes, updated_at) "
-            "VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT (offer_id) DO UPDATE SET status = excluded.status, "
-            "applied_on = excluded.applied_on, notes = excluded.notes, "
-            "updated_at = excluded.updated_at",
-            (offer_id, status, to_text(applied_on), notes, to_text(now)),
-        )
-    except sqlite3.Error as err:
-        raise StorageError(
-            f"Impossible d'enregistrer le suivi de l'offre {offer_id} : {err}"
-        ) from err
 
 
 def set_status(conn, offer_ids, status, now):

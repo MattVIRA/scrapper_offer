@@ -8,7 +8,7 @@ dans `.claude/LOTS.md`, les tickets dans `.claude/TICKETS/LOT_<n>/T<n>.<m>.md`.
 
 Code dans `src/offers/` : `sources/` (une classe par source, contrat
 dans `sources/base.py`), `storage/` (`database.py`, seul module qui parle
-à SQLite, `schema.sql`, `excel_import.py`), `scoring/`, `exports/`,
+à SQLite, `schema.sql`, `migrations/`), `scoring/`, `exports/`,
 `tracking.py` (statuts de suivi), `pipeline.py` (orchestrateur),
 `ui/` (interface Streamlit : `app.py`, une page par script de
 `app_pages/`), `__main__.py` (ligne de commande).
@@ -17,9 +17,8 @@ dans `sources/base.py`), `storage/` (`database.py`, seul module qui parle
 
 ```bash
 pip install -e ".[dev]"         # installer, dans le .venv
-python -m offers collect        # interroge les sites, met à jour la base puis l'Excel
-python -m offers import-excel   # une seule fois : offres et suivi de l'Excel vers la base
-python -m offers export         # met à jour l'Excel à partir de la base, sans réseau
+python -m offers collect        # interroge les sites, met à jour la base puis régénère l'Excel
+python -m offers export         # régénère l'Excel à partir de la base, sans réseau
 python -m offers duplicates     # affiche les doublons probables
 offers ui                       # ouvre l'interface sur http://localhost:8501 (Ctrl+C pour l'arrêter)
 pytest                          # tests, sans réseau
@@ -37,7 +36,7 @@ L'interface n'écoute que sur `localhost` (option passée par `offers ui`
 et `.streamlit/config.toml`) ; elle se teste avec `AppTest`, sans
 navigateur (`tests/test_ui_app.py`).
 
-`collect`, `import-excel` et `export` modifient la base ou l'Excel de
+`collect` et `export` modifient la base ou l'Excel de
 l'utilisateur (et `collect` appelle les vrais sites) : ne pas les lancer
 sans accord sur ses fichiers. Les tests suffisent pour vérifier.
 
@@ -88,12 +87,14 @@ sans accord sur ses fichiers. Les tests suffisent pour vérifier.
 ## Règles à ne jamais casser
 
 - La base est la référence des offres ; l'Excel en est un export.
-- Les données saisies par l'utilisateur (Statut, Postulé le, Notes,
-  colonnes ajoutées à la main) ne sont jamais modifiées.
-- La table `tracking` n'est écrite qu'à partir des saisies de
-  l'utilisateur. Jusqu'au lot 3, il les fait dans l'Excel, et
-  `sync_tracking` les recopie dans la base à chaque collecte ; l'export
-  n'écrit jamais les colonnes de l'utilisateur.
+- L'Excel ne sert qu'à consulter : il est régénéré entièrement depuis
+  la base à chaque export (offres hors corbeille, suivi compris), et rien
+  n'y est jamais lu. Ce qui y est tapé à la main est perdu à l'export
+  suivant (sauf dans `output/backup/`).
+- La table `tracking` (statut, lettre, favori, lecture, corbeille, date
+  de candidature, notes) n'est écrite que par l'interface, à partir des
+  saisies de l'utilisateur ; la collecte n'y touche jamais.
+- Une offre n'est jamais supprimée : la corbeille la masque.
 - Écriture atomique : fichier temporaire, puis remplacement (Excel) ;
   une transaction par écriture (base, via `database.transaction`).
 - Sauvegarde avant chaque modification : l'Excel dans `output/backup/`,
@@ -109,9 +110,7 @@ sans accord sur ses fichiers. Les tests suffisent pour vérifier.
 `tests/test_excel_export.py` vérifie ces règles. Si l'instantané
 (`tests/fixtures/excel_expected.json`) change, c'est que le comportement
 change : ne le régénérer (`UPDATE_SNAPSHOT=1`) que si c'est voulu par le
-ticket. `excel_attendu.json` est l'instantané de l'ancien code (T0.5) :
-ne jamais le régénérer ; hors colonne « Source » et liste déroulante
-« Statut », le fichier produit doit lui rester identique.
+ticket.
 
 Toute nouvelle source passe le contrat de `tests/sources_contract.py`.
 

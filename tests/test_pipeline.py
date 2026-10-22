@@ -10,9 +10,8 @@ from offers.config import Config
 from offers.errors import OffersError
 from offers.exports import excel
 from offers.pipeline import run_collect
-from offers.storage.database import connect, last_runs, list_offers
+from offers.storage.database import connect, last_runs, list_offers, set_status
 from tests.factories import FakeSource, make_offer
-from tests.test_excel_import import edit
 
 DAY_1 = datetime(2026, 10, 20, 8, 0)
 DAY_2 = datetime(2026, 10, 21, 8, 0)
@@ -31,11 +30,10 @@ def offer(number, source="fake"):
 
 def rows(path):
     """Return {reference: "En ligne" value}."""
-    sheet = load_workbook(path).active
-    columns = excel.read_columns(sheet)
+    online = excel.COLUMNS.index("En ligne")
     return {
-        row[columns["Réf."] - 1]: row[columns["En ligne"] - 1]
-        for row in sheet.iter_rows(min_row=2, values_only=True)
+        row[0]: row[online]
+        for row in load_workbook(path).active.iter_rows(min_row=2, values_only=True)
     }
 
 
@@ -85,8 +83,7 @@ def test_nominal_case(collect, db, path):
     (source,) = report.sources
     assert source.name == "fake" and source.error is None
     assert (source.saved.found, source.saved.added, source.saved.relevant) == (2, 2, 2)
-    assert (report.excel.added, report.excel.removed) == (2, 0)
-    assert report.sync.updated == 0
+    assert report.excel.rows == 2
 
 
 def test_a_failing_source_does_not_stop_the_others(collect, db, path):
@@ -109,7 +106,7 @@ def test_a_failing_source_does_not_stop_the_others(collect, db, path):
     }
     errors = {s.name: s.error for s in report.sources}
     assert errors == {"bad": "site en panne", "good": None}
-    assert report.excel.added == 1 and report.excel.removed == 1
+    assert report.excel.rows == 3
 
 
 def test_a_source_that_cannot_tell_what_is_online(collect, path):
@@ -163,7 +160,7 @@ def test_two_runs_add_no_duplicate(collect, db, path):
 
     assert list(online_in_db(db)) == ["fake-1", "fake-2"]
     assert len(load_workbook(path).active["A"]) == 3
-    assert report.sources[0].saved.added == 0 and report.excel.added == 0
+    assert report.sources[0].saved.added == 0 and report.excel.rows == 2
 
 
 def test_each_run_logs_every_source_and_saves_the_database(collect, db):
@@ -193,19 +190,27 @@ def test_each_run_logs_every_source_and_saves_the_database(collect, db):
     assert backups == ["offers_2026-10-21_0800.db"]
 
 
-def test_tracking_entered_in_the_excel_is_kept(collect, db, path):
+def test_follow_up_is_exported_and_the_excel_is_not_read(collect, db, path):
     collect(DAY_1, FakeSource(found=[offer(1), offer(2)], online=[offer(1), offer(2)]))
-    edit(path, {("fake-1", "Statut"): "Postulé", ("fake-1", "Notes"): "Relancer"})
+    conn = connect(db)
+    stored = {s.offer.reference: s.id for s in list_offers(conn)}
+    set_status(conn, [stored["fake-1"]], "applied", DAY_1)
+    conn.close()
+    # Typed in the file: ignored, and lost at the next export.
+    workbook = load_workbook(path)
+    sheet = workbook.active
+    sheet.cell(row=3, column=excel.COLUMNS.index("Statut") + 1, value="Refusé")
+    workbook.save(path)
 
-    report = collect(DAY_2, FakeSource(found=[offer(1), offer(3)], online=[offer(1), offer(3)]))
+    collect(DAY_2, FakeSource(found=[offer(1), offer(3)], online=[offer(1), offer(3)]))
 
     conn = connect(db)
-    stored = {s.offer.reference: s for s in list_offers(conn)}
-    assert (stored["fake-1"].status, stored["fake-1"].notes) == ("applied", "Relancer")
-    assert report.sync.updated == 1
+    statuses = {s.offer.reference: s.status for s in list_offers(conn)}
+    assert statuses == {"fake-1": "applied", "fake-2": None, "fake-3": None}
+    status_column = excel.COLUMNS.index("Statut")
     sheet_rows = {r[0]: r for r in load_workbook(path).active.iter_rows(values_only=True)}
-    columns = excel.read_columns(load_workbook(path).active)
-    assert sheet_rows["fake-1"][columns["Statut"] - 1] == "Postulé"
+    assert sheet_rows["fake-1"][status_column] == "Postulé"
+    assert sheet_rows["fake-2"][status_column] is None
 
 
 def test_sources_created_from_the_config(monkeypatch, db, path):
