@@ -1,5 +1,5 @@
-"""Page « Corbeille »: the hidden offers, which can be restored."""
+"""Page « Corbeille »: the hidden offers, which can be restored, never deleted."""
 
-import streamlit as st
+from offers.ui.offer_table import PageSettings, show_offer_page
 
-st.title("Corbeille")
+show_offer_page(PageSettings(key="trash", title="Corbeille", in_trash=True, count_in_title=True))

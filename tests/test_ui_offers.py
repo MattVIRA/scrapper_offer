@@ -21,7 +21,7 @@ from tests.factories import make_offer, make_stored
 
 NOW = datetime(2026, 10, 22, 9, 30)
 TIMEOUT = 30
-PAGE = PageSettings(key="offers")
+PAGE = PageSettings(key="offers", title="Offres")
 SELECTED = "offers_selected"
 
 
@@ -297,7 +297,7 @@ def test_make_filter_without_choice_filters_nothing():
 
 def test_make_filter_with_choices():
     result = make_filter(
-        PageSettings(key="favorites", favorites_only=True),
+        PageSettings(key="favorites", title="Favoris", favorites_only=True),
         text="data",
         statuses=[labels.NONE_CODE, "applied"],
         letters=[labels.NONE_CODE],

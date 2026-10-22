@@ -9,10 +9,11 @@ from offers.__main__ import DEFAULT_CONFIG, DEFAULT_DB, UI_APP
 from offers.storage.database import connect
 from offers.ui.session import parse_args
 
+# Favoris and Corbeille show their number of offers.
 PAGES = {
     "app_pages/offers.py": "Offres",
-    "app_pages/favorites.py": "Favoris",
-    "app_pages/trash.py": "Corbeille",
+    "app_pages/favorites.py": "Favoris (0)",
+    "app_pages/trash.py": "Corbeille (0)",
     "app_pages/collect.py": "Collecte",
 }
 # The first run imports Streamlit and the project.

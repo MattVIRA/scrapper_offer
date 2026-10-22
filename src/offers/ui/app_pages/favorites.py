@@ -1,5 +1,7 @@
-"""Page « Favoris »: the offers marked as favorite."""
+"""Page « Favoris »: the offers marked as favorite, without their yellow marker."""
 
-import streamlit as st
+from offers.ui.offer_table import PageSettings, show_offer_page
 
-st.title("Favoris")
+show_offer_page(
+    PageSettings(key="favorites", title="Favoris", favorites_only=True, count_in_title=True)
+)

@@ -4,6 +4,8 @@ Shown in a side drawer (st.dialog) over the list, so that the list stays
 as it was. Opening the card marks the offer as read (offer_table).
 """
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime
 from functools import partial
 
@@ -28,6 +30,16 @@ ONLINE_LABEL = "Oui"
 OFFLINE_LABEL = "Plus en ligne"
 
 
+@dataclass(frozen=True)
+class CardAction:
+    """Button at the bottom of the card, such as « Mettre à la corbeille »."""
+
+    label: str
+    icon: str
+    # Called with [offer id].
+    run: Callable
+
+
 def card_key(settings):
     """Session state key holding the id of the offer whose card is open."""
     return settings.state_key("card")
@@ -41,11 +53,12 @@ def close_card(settings):
     st.session_state.pop(card_key(settings), None)
 
 
-def show_card(settings, stored, duplicates, on_trash):
+def show_card(settings, stored, duplicates, action, editable=True):
     """Open the card of a StoredOffer.
 
     duplicates: references of its probable duplicates.
-    on_trash: function called with [offer id] by « Mettre à la corbeille ».
+    action: CardAction of the button at the bottom; it closes the card.
+    editable: False shows the follow-up without the form (trash).
     """
     dialog = st.dialog(
         stored.offer.title,
@@ -53,16 +66,17 @@ def show_card(settings, stored, duplicates, on_trash):
         position="right",
         on_dismiss=partial(close_card, settings),
     )
-    dialog(card_body)(settings, stored, duplicates, on_trash)
+    dialog(card_body)(settings, stored, duplicates, action, editable)
 
 
-def card_body(settings, stored, duplicates, on_trash):
+def card_body(settings, stored, duplicates, action, editable):
     show_summary(stored, duplicates)
-    show_follow_up_form(settings, stored)
-    if st.button(
-        "Mettre à la corbeille", icon=":material/delete:", key=settings.state_key("card_trash")
-    ):
-        on_trash([stored.id])
+    if editable:
+        show_follow_up_form(settings, stored)
+    else:
+        show_follow_up(stored)
+    if st.button(action.label, icon=action.icon, key=settings.state_key("card_action")):
+        action.run([stored.id])
         close_card(settings)
         st.rerun()
 
@@ -107,6 +121,30 @@ def details(stored):
 
 def format_date(value):
     return value.strftime(DATE_FORMAT) if value else MISSING
+
+
+def show_follow_up(stored):
+    """Show the follow-up without changing it."""
+    st.subheader("Suivi")
+    st.table(follow_up(stored), border="horizontal", width="content")
+
+
+def follow_up(stored):
+    """Return {label: text} of the user's follow-up of the offer."""
+    return {
+        "Statut": status_choice_label(to_widget_code(stored.status)),
+        "Lettre": letter_choice_label(to_widget_code(stored.letter_status)),
+        "Favori": "Oui" if stored.favorite else "Non",
+        "Postulé le": format_applied_on(stored.applied_on),
+        "Notes": stored.notes or MISSING,
+    }
+
+
+def format_applied_on(text):
+    """Return the application date as shown: a date, or the text typed in the old Excel."""
+    if as_date(text):
+        return format_date(as_date(text))
+    return text or MISSING
 
 
 def show_follow_up_form(settings, stored):

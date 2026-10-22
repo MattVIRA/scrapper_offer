@@ -122,7 +122,7 @@ def test_nothing_is_written_before_saving(start, db_path, ids):
     at = start(ids["VIE1"])
     at.selectbox(key=field(ids, "VIE1", "status")).select("applied")
     at.text_area(key=field(ids, "VIE1", "notes")).set_value("Brouillon")
-    at.button(key="offers_card_trash").click().run()
+    at.button(key="offers_card_action").click().run()
 
     first = by_reference(db_path)["VIE1"]
     assert (first.status, first.notes) == (None, None)
@@ -142,7 +142,7 @@ def test_form_shows_the_current_follow_up(start, db_path, ids):
 
 def test_trash_from_the_card_can_be_undone(start, db_path, ids):
     at = start(ids["VIE1"])
-    at.button(key="offers_card_trash").click().run()
+    at.button(key="offers_card_action").click().run()
 
     assert by_reference(db_path)["VIE1"].hidden
     assert CARD not in at.session_state
@@ -185,4 +185,4 @@ def test_applied_on_to_save(chosen, stored_text, expected):
 
 
 def test_card_key_belongs_to_the_page():
-    assert offer_card.card_key(PageSettings(key="favorites")) == "favorites_card"
+    assert offer_card.card_key(PageSettings(key="favorites", title="Favoris")) == "favorites_card"

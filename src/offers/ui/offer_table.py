@@ -43,6 +43,8 @@ ONLINE_LABELS = {
     browsing.ALL: "Toutes",
 }
 FAVORITE_MARK = "★"
+TRASH_ICON = ":material/delete:"
+RESTORE_ICON = ":material/restore_from_trash:"
 OPEN_LABEL = ":material/open_in_new: Ouvrir"
 DATE_FORMAT = "DD/MM/YYYY"
 
@@ -59,8 +61,6 @@ COLUMNS = [
     "Durée", "Publiée le", "Ajoutée le", STATUS, "Lettre", "Favori", "En ligne", OPEN,
 ]
 # fmt: on
-# The only columns the user can change in the table.
-EDITABLE = {CHOOSE, STATUS}
 
 
 @dataclass(frozen=True)
@@ -69,11 +69,26 @@ class PageSettings:
 
     # Prefix of the widget and session state keys of the page.
     key: str
+    title: str
     favorites_only: bool = False
+    # The trash page: hidden offers, which can only be restored.
     in_trash: bool = False
+    # Number of offers of the page in its title (Favoris, Corbeille).
+    count_in_title: bool = False
 
     def state_key(self, name):
         return f"{self.key}_{name}"
+
+    def default_statuses(self):
+        # The trash is often made of offers the user did not want.
+        return frozenset({None, *STATUSES}) if self.in_trash else browsing.DEFAULT_STATUSES
+
+    def default_online(self):
+        return browsing.ALL if self.in_trash else browsing.ONLINE
+
+    def editable_columns(self):
+        """Columns the user can change in the table; nothing but the box in the trash."""
+        return {CHOOSE} if self.in_trash else {CHOOSE, STATUS}
 
 
 def show_offer_page(settings):
@@ -85,6 +100,7 @@ def show_offer_page(settings):
             # Read again, for the counters and the table.
             offers = list_offers(conn)
         tags = browsing.duplicate_tags(probable_duplicates(conn))
+    st.title(page_title(settings, offers))
     offer_filter = filter_sidebar(offers, settings)
     shown = browsing.filter_offers(offers, offer_filter)
     show_counters(shown)
@@ -92,6 +108,19 @@ def show_offer_page(settings):
     show_actions(settings, shown)
     show_table(settings, shown, tags)
     show_open_card(settings, offers, tags)
+
+
+def page_title(settings, offers):
+    """Return the title of the page, with its number of offers if wanted."""
+    if not settings.count_in_title:
+        return settings.title
+    whole_page = OfferFilter(
+        statuses=frozenset({None, *STATUSES}),
+        online=browsing.ALL,
+        favorites_only=settings.favorites_only,
+        in_trash=settings.in_trash,
+    )
+    return f"{settings.title} ({len(browsing.filter_offers(offers, whole_page))})"
 
 
 def opened_offer(settings, offers):
@@ -124,7 +153,23 @@ def show_open_card(settings, offers, tags):
         settings,
         stored,
         tags.get(stored.id, []),
-        on_trash=lambda offer_ids: act(settings, hide, offer_ids, trashed=True),
+        card_action(settings),
+        editable=not settings.in_trash,
+    )
+
+
+def card_action(settings):
+    """Button of the card: restore in the trash, move to the trash elsewhere."""
+    if settings.in_trash:
+        return offer_card.CardAction(
+            "Restaurer",
+            RESTORE_ICON,
+            lambda offer_ids: act(settings, restore, offer_ids),
+        )
+    return offer_card.CardAction(
+        "Mettre à la corbeille",
+        TRASH_ICON,
+        lambda offer_ids: act(settings, hide, offer_ids, trashed=True),
     )
 
 
@@ -144,7 +189,7 @@ def filter_sidebar(offers, settings):
         statuses = st.multiselect(
             "Statut",
             STATUS_CHOICES,
-            default=sorted(map(to_widget_code, browsing.DEFAULT_STATUSES), key=status_order),
+            default=sorted(map(to_widget_code, settings.default_statuses()), key=status_order),
             format_func=status_choice_label,
             placeholder="Tous",
             key=key("statuses"),
@@ -159,7 +204,7 @@ def filter_sidebar(offers, settings):
         online = st.segmented_control(
             "En ligne",
             list(ONLINE_LABELS),
-            default=browsing.ONLINE,
+            default=settings.default_online(),
             format_func=ONLINE_LABELS.get,
             key=key("online"),
         )
@@ -254,6 +299,9 @@ def show_actions(settings, shown):
     key = settings.state_key
     with st.container(horizontal=True, vertical_alignment="center"):
         st.caption(f"{len(checked)} cochées")
+        if settings.in_trash:
+            action_button(settings, "Restaurer", RESTORE_ICON, checked, restore)
+            return
         st.menu_button(
             "Statut",
             list(STATUSES),
@@ -278,7 +326,7 @@ def show_actions(settings, shown):
         action_button(settings, "Retirer des favoris", ":material/star_border:", checked,
                       remove_favorite)  # fmt: skip
         action_button(settings, "Marquer comme lu", ":material/done:", checked, mark_read)
-        action_button(settings, "Corbeille", ":material/delete:", checked, hide, trashed=True)
+        action_button(settings, "Corbeille", TRASH_ICON, checked, hide, trashed=True)
         st.button(
             "Tout marquer comme lu",
             icon=":material/done_all:",
@@ -338,7 +386,7 @@ def show_undo(settings):
     if not trashed:
         return
     with st.container(horizontal=True, vertical_alignment="center"):
-        st.success(f"{len(trashed)} offres mises à la corbeille", icon=":material/delete:")
+        st.success(f"{len(trashed)} offres mises à la corbeille", icon=TRASH_ICON)
         st.button(
             "Annuler",
             icon=":material/undo:",
@@ -365,7 +413,7 @@ def show_table(settings, shown, tags):
         on_change=save_table_changes,
         args=(settings,),
         hide_index=True,
-        disabled=[column for column in COLUMNS if column not in EDITABLE],
+        disabled=[column for column in COLUMNS if column not in settings.editable_columns()],
         column_config=column_config(settings),
         alt="Offres filtrées, avec leur suivi",
     )
