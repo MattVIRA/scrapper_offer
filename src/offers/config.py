@@ -164,7 +164,7 @@ def set_search_enabled(path, source_name, search_name, enabled, backup_dir, now)
         raise ConfigError(f"Impossible de lire {path} : {err}") from err
     except RoundTripError as err:
         raise ConfigError(f"{path} n'est pas un YAML valide : {err}") from err
-    find_search(data, path, source_name, search_name)["enabled"] = enabled
+    set_enabled(find_search(data, path, source_name, search_name), enabled)
     text = io.StringIO()
     round_trip.dump(data, text)
     backup_config(path, Path(backup_dir), now)
@@ -190,6 +190,18 @@ def find_search(data, path, source_name, search_name):
         if isinstance(search, dict) and search.get("name") == search_name:
             return search
     raise ConfigError(f"{path} : recherche « {search_name} » introuvable pour {source_name}.")
+
+
+def set_enabled(search, enabled):
+    """Set « enabled » in the section of a search.
+
+    A new line goes right after « name »: at the end of the section, it
+    would land after the comments that follow the search in the file.
+    """
+    if "enabled" in search:
+        search["enabled"] = enabled
+    else:
+        search.insert(list(search).index("name") + 1, "enabled", enabled)
 
 
 def backup_config(path, backup_dir, now):

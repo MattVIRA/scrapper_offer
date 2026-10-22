@@ -132,10 +132,30 @@ def test_switch_off_adds_the_line_and_keeps_the_comments(tmp_path):
     set_search_enabled(path, "other", "A", False, tmp_path / "backup", NOW)
 
     lines = WITH_COMMENTS.splitlines()
-    lines.insert(7, "        enabled: false")
+    # Right after « name »: the comments of the file stay where they were.
+    lines.insert(6, "        enabled: false")
     assert open(path, encoding="utf-8").read().splitlines() == lines
     (source,) = load_config(path, KNOWN).sources
     assert source.active_searches() == []
+
+
+def test_new_line_of_the_last_search_stays_above_the_next_comments(tmp_path):
+    text = """sources:
+  other:
+    searches:
+      - name: "A"
+        url: "https://example.com/a"
+
+# Mots-clés cherchés.
+keywords_include: [python]
+"""
+    path = write(tmp_path, text)
+
+    set_search_enabled(path, "other", "A", False, tmp_path / "backup", NOW)
+
+    assert open(path, encoding="utf-8").read() == text.replace(
+        '      - name: "A"\n', '      - name: "A"\n        enabled: false\n'
+    )
 
 
 def test_switch_on_changes_the_line(tmp_path):
@@ -165,9 +185,9 @@ def test_repository_config_only_gets_the_enabled_line(tmp_path):
 
     before = open(os.path.join(ROOT, "config.yaml"), encoding="utf-8").read().splitlines()
     after = path.read_text(encoding="utf-8").splitlines()
-    added = [line for line in after if line not in before]
-    assert added == ["        enabled: false"]
-    assert len(after) == len(before) + 1
+    name_line = before.index('      - name: "Recherche principale"')
+    # The repository file has no « enabled » line for its search.
+    assert after == before[: name_line + 1] + ["        enabled: false"] + before[name_line + 1 :]
 
 
 @pytest.mark.parametrize(

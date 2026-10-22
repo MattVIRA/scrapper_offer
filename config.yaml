@@ -17,7 +17,6 @@ sources:
 # Mots-clés cherchés dans le titre, la description et le profil.
 # Majuscules et accents ne comptent pas. Le score d'une offre est le
 # nombre de mots-clés trouvés.
-        enabled: true
 keywords_include:
   - python
   - machine learning

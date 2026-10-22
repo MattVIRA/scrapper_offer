@@ -9,9 +9,18 @@ dans `.claude/LOTS.md`, les tickets dans `.claude/TICKETS/LOT_<n>/T<n>.<m>.md`.
 Code dans `src/offers/` : `sources/` (une classe par source, contrat
 dans `sources/base.py`), `storage/` (`database.py`, seul module qui parle
 à SQLite, `schema.sql`, `migrations/`), `scoring/`, `exports/`,
-`tracking.py` (statuts de suivi), `pipeline.py` (orchestrateur),
-`ui/` (interface Streamlit : `app.py`, une page par script de
-`app_pages/`), `__main__.py` (ligne de commande).
+`tracking.py` (statuts de suivi), `browsing.py` (filtres, compteurs,
+pastilles des listes, sans Streamlit), `pipeline.py` (orchestrateur),
+`summary.py` (textes du bilan de collecte), `backups.py`,
+`__main__.py` (ligne de commande) et `ui/`, l'interface Streamlit :
+- `app.py` : point d'entrée, navigation, erreurs du projet affichées ;
+- `app_pages/` : une page par script (Offres, Favoris, Corbeille,
+  Collecte), qui ne fait qu'appeler les modules ci-dessous ;
+- `offer_table.py` : liste commune aux pages Offres, Favoris et
+  Corbeille (`PageSettings`) ; `offer_card.py` : fiche d'une offre ;
+- `collect_job.py` : collecte dans un fil de fond ; `session.py` :
+  chemins et ouverture de la base ; `labels.py` : choix de statut et de
+  lettre.
 
 ## Commandes
 
@@ -35,12 +44,24 @@ Options : `--db` (défaut `data/offers.db`) et `--excel` (défaut
 Pour la lancer sans l'activer, alias facultatif dans `~/.zshrc` :
 `alias offers="$HOME/Documents/CODE/scrapper_offer/.venv/bin/offers"`.
 L'interface n'écoute que sur `localhost` (option passée par `offers ui`
-et `.streamlit/config.toml`) ; elle se teste avec `AppTest`, sans
-navigateur (`tests/test_ui_app.py`).
+et `.streamlit/config.toml`). Après une mise à jour du code, relancer
+`offers ui` : Streamlit relit les pages, mais garde en mémoire les
+modules déjà importés.
 
-`collect` et `export` modifient la base ou l'Excel de
-l'utilisateur (et `collect` appelle les vrais sites) : ne pas les lancer
-sans accord sur ses fichiers. Les tests suffisent pour vérifier.
+`collect`, `export` et `ui` modifient la base, l'Excel ou `config.yaml`
+de l'utilisateur (et `collect` appelle les vrais sites) : ne pas les
+lancer sans accord sur ses fichiers. Les tests suffisent pour vérifier.
+
+**Tester l'interface.** `AppTest` (`streamlit.testing.v1`), sans
+navigateur, sur une base dans `tmp_path`, jamais la vraie (ne pas lancer
+l'app sans `--db`). `AppTest` ne sait ni cocher une case ni changer une
+cellule d'un `st.data_editor`, ni cliquer un `ButtonColumn` : les offres
+cochées sont dans `st.session_state["<page>_selected"]`, la fiche
+ouverte dans `"<page>_card"` (les tests les remplissent), et les
+modifications du tableau passent par `offer_table.apply_table_changes`,
+testée avec pytest. Ces gestes sont à faire vérifier par l'utilisateur.
+La logique sans Streamlit (`browsing.py`, `summary.py`) se teste avec
+pytest seul.
 
 ## Style du code
 
@@ -80,9 +101,12 @@ sans accord sur ses fichiers. Les tests suffisent pour vérifier.
 - Une source en erreur n'arrête pas les autres : le pipeline garde son
   erreur et l'affiche dans le bilan.
 - Message d'erreur : ce qui s'est passé et quoi faire, en français.
-- Seul le point d'entrée (`__main__.py`) attrape les
+- Seuls les points d'entrée (`__main__.py`, `ui/app.py`) attrapent les
   exceptions du projet pour les afficher ; les erreurs inattendues
-  remontent avec leur trace complète.
+  remontent avec leur trace complète. Exception : une action de
+  l'interface (export de l'Excel, interrupteur d'une recherche) affiche
+  son erreur à côté du bouton, pour que le reste de la page reste
+  utilisable.
 - Ne rien modifier sur disque tant qu'une erreur reste possible
   (écriture atomique, vérifications avant d'écrire).
 
@@ -96,7 +120,9 @@ sans accord sur ses fichiers. Les tests suffisent pour vérifier.
 - La table `tracking` (statut, lettre, favori, lecture, corbeille, date
   de candidature, notes) n'est écrite que par l'interface, à partir des
   saisies de l'utilisateur ; la collecte n'y touche jamais.
-- Une offre n'est jamais supprimée : la corbeille la masque.
+- Une offre n'est jamais supprimée : la corbeille la masque
+  (`tracking.hidden`), et l'on peut la restaurer.
+- L'interface n'écoute que sur `localhost`, jamais sur le réseau local.
 - Excel ouvert pendant une collecte : la collecte se fait quand même,
   seul l'export est sauté et signalé dans le bilan. Les textes du bilan
   sont dans `summary.py`, partagés par la ligne de commande et
