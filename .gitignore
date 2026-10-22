@@ -34,6 +34,7 @@ lettres/
 
 # Claude Code
 .claude
+.agents/
 
 # Système / éditeurs
 .DS_Store

@@ -112,6 +112,8 @@ Toute nouvelle source passe le contrat de `tests/sources_contract.py`.
 - Ne rien modifier hors du périmètre du ticket ; noter dans ses « Notes »
   ce qui est découvert ou décidé.
 - Tests à jour et `pytest` vert avant de considérer un ticket terminé.
+- Un ticket = un commit (décidé au lot 3) : à la fin de chaque ticket,
+  proposer son message.
 - L'utilisateur fait lui-même ses commits : proposer un message (voir
   « Messages de commit »), sans commiter. Pas de tags.
 
