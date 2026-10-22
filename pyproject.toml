@@ -19,9 +19,11 @@ dev = [
     "ruff",
 ]
 
-[tool.setuptools]
-# Le code passera dans src/ au lot 1.
-packages = ["vie"]
+[project.scripts]
+offers = "offers.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

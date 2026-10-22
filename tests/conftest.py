@@ -1,26 +1,26 @@
-"""Données communes aux tests."""
+"""Data shared by the tests."""
 
 import json
 import os
 
 import pytest
 
-DOSSIER_FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
+FIXTURES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 
 
-def lire_fixture(nom):
-    """Renvoie le texte d'un fichier de tests/fixtures."""
-    with open(os.path.join(DOSSIER_FIXTURES, nom), encoding="utf-8") as fichier:
-        return fichier.read()
-
-
-@pytest.fixture
-def recherche_business_france():
-    """Vraie réponse de l'API Business France : {"result": [...], "count": ...}."""
-    return json.loads(lire_fixture("business_france_recherche.json"))
+def read_fixture(name):
+    """Return the text of a file of tests/fixtures."""
+    with open(os.path.join(FIXTURES_DIR, name), encoding="utf-8") as file:
+        return file.read()
 
 
 @pytest.fixture
-def page_business_france():
-    """Extrait de la page de recherche du site, avec une fausse clé d'API."""
-    return lire_fixture("business_france_page.html")
+def business_france_search():
+    """Real Business France API response: {"result": [...], "count": ...}."""
+    return json.loads(read_fixture("business_france_search.json"))
+
+
+@pytest.fixture
+def business_france_page():
+    """Excerpt of the site's search page, with a fake API key."""
+    return read_fixture("business_france_page.html")

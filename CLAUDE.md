@@ -1,20 +1,25 @@
 # scrapper_offer
 
-Récupère les offres VIE de Business France et les range dans un fichier
-Excel (`output/offres_vie.xlsx`). Application personnelle, en cours de
-refonte : la feuille de route est dans `.claude/LOTS.md`, les tickets
-dans `.claude/TICKETS/LOT_<n>/T<n>.<m>.md`.
+Récupère des offres d'emploi (pour l'instant les VIE de Business France)
+et les range dans un fichier Excel (`output/offres_vie.xlsx`).
+Application personnelle, en cours de refonte : la feuille de route est
+dans `.claude/LOTS.md`, les tickets dans `.claude/TICKETS/LOT_<n>/T<n>.<m>.md`.
+
+Code dans `src/offers/` : `sources/` (une classe par source, contrat
+dans `sources/base.py`), `scoring/`, `exports/`, `pipeline.py`
+(orchestrateur), `__main__.py` (ligne de commande).
 
 ## Commandes
 
 ```bash
 pip install -e ".[dev]"   # installer, dans le .venv
-python run.py             # lancer : interroge le site et modifie l'Excel
+python -m offers collect  # lancer : interroge les sites et modifie l'Excel
 pytest                    # tests, sans réseau
 ruff check .              # vérifier le code
+ruff format .             # mettre en forme (ruff format --check . pour vérifier)
 ```
 
-`python run.py` appelle le vrai site et modifie l'Excel de l'utilisateur :
+`python -m offers collect` appelle les vrais sites et modifie l'Excel de l'utilisateur :
 ne pas le lancer sans accord. Les tests suffisent pour vérifier.
 
 ## Style du code
@@ -25,9 +30,7 @@ ne pas le lancer sans accord. Les tests suffisent pour vérifier.
   paramètres ou le retour qui ne sont pas évidents.
 - Commentaires : expliquer le *pourquoi*, pas le *quoi*.
 - Noms (modules, classes, fonctions, variables, tables SQLite,
-  sous-commandes) : en anglais. Le code de `vie/` est encore en français ;
-  il est traduit au lot 1, pendant son déplacement dans `src/`. Ne pas
-  le renommer hors de ce lot.
+  sous-commandes) : en anglais.
 - Restent en français, car ce sont des sorties pour l'utilisateur :
   messages affichés (erreurs, bilans), titres des colonnes Excel
   (« Réf. », « En ligne », ...), valeurs comme « Plus en ligne » ou les
@@ -40,8 +43,9 @@ ne pas le lancer sans accord. Les tests suffisent pour vérifier.
 - Pas de dépendance cachée : passer ce dont une fonction a besoin en
   paramètre plutôt que lire un état global.
 - Tout comportement nouveau ou modifié est couvert par un test.
-- `ruff format` n'est pas appliqué (voir T0.3) : garder la mise en page
-  existante.
+- Mise en page : `ruff format` (décidé en T1.9). Un tableau compact plus
+  lisible sur quelques lignes peut être protégé par `# fmt: off` /
+  `# fmt: on`, comme `SCRIPT_COLUMNS` et `WIDTHS` dans `exports/excel.py`.
 
 **Exceptions.**
 - Attraper seulement les exceptions attendues et précises
@@ -49,11 +53,13 @@ ne pas le lancer sans accord. Les tests suffisent pour vérifier.
   `except Exception:` sans relancer.
 - Ne jamais avaler une erreur en silence : la relancer, ou la
   journaliser et le dire dans le bilan.
-- Traduire les erreurs techniques en exceptions du projet (`ErreurApi`,
-  `ErreurExcel`, puis `ApiError`, `ExcelError` après le lot 1) avec
+- Traduire les erreurs techniques en exceptions du projet, qui héritent
+  de `OffersError` (`ConfigError`, `ApiError`, `ExcelError`), avec
   `raise ... from err`, pour garder la cause.
+- Une source en erreur n'arrête pas les autres : le pipeline garde son
+  erreur et l'affiche dans le bilan.
 - Message d'erreur : ce qui s'est passé et quoi faire, en français.
-- Seul le point d'entrée (`run.py`, puis `__main__.py`) attrape les
+- Seul le point d'entrée (`__main__.py`) attrape les
   exceptions du projet pour les afficher ; les erreurs inattendues
   remontent avec leur trace complète.
 - Ne rien modifier sur disque tant qu'une erreur reste possible
@@ -70,9 +76,14 @@ ne pas le lancer sans accord. Les tests suffisent pour vérifier.
 - Une offre n'est marquée « Plus en ligne » que si la source donne la
   liste complète de ses offres.
 
-`tests/test_excel.py` vérifie ces règles. Si l'instantané
-(`tests/fixtures/excel_attendu.json`) change, c'est que le comportement
-change : ne le régénérer que si c'est voulu par le ticket.
+`tests/test_excel_export.py` vérifie ces règles. Si l'instantané
+(`tests/fixtures/excel_expected.json`) change, c'est que le comportement
+change : ne le régénérer (`UPDATE_SNAPSHOT=1`) que si c'est voulu par le
+ticket. `excel_attendu.json` est l'instantané de l'ancien code (T0.5) :
+ne jamais le régénérer ; hors colonne « Source », le fichier produit
+doit lui rester identique.
+
+Toute nouvelle source passe le contrat de `tests/sources_contract.py`.
 
 ## Façon de travailler
 
@@ -87,4 +98,4 @@ change : ne le régénérer que si c'est voulu par le ticket.
 
 Ne pas lire ni versionner `output/`, `profil/` et `lettres/`, sauf si le
 ticket le demande. Les fixtures ne contiennent ni vraie clé d'API ni
-coordonnées de contact (voir `tests/fixtures/capturer_business_france.py`).
+coordonnées de contact (voir `tests/fixtures/capture_business_france.py`).
