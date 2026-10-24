@@ -1,16 +1,14 @@
 """Offer list shared by the Offres, Favoris and Corbeille pages.
 
-Filters in the sidebar, counters, actions on the checked offers and the
-table. The checked offers live in the session state, not in the table:
-the table only shows them, so the page always knows what is checked.
+Search and filters on top, then the list with the card beside it, as in
+a mailbox. The checked offers live in the session state, not in the
+list: the list only shows them, so the page always knows what is checked.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from functools import partial
 
-import pandas as pd
 import streamlit as st
 
 from offers import browsing
@@ -26,8 +24,8 @@ from offers.storage.database import (
     set_letter_status,
     set_status,
 )
-from offers.tracking import STATUSES, letter_label, status_label
-from offers.ui import offer_card
+from offers.tracking import STATUSES, status_label
+from offers.ui import offer_card, offer_list
 from offers.ui.labels import (
     LETTER_CHOICES,
     STATUS_CHOICES,
@@ -36,6 +34,7 @@ from offers.ui.labels import (
     to_database_code,
     to_widget_code,
 )
+from offers.ui.offer_list import ListEvents, ListKeys
 from offers.ui.session import open_database
 
 ONLINE_LABELS = {
@@ -45,37 +44,20 @@ ONLINE_LABELS = {
 }
 TRASH_ICON = ":material/delete:"
 RESTORE_ICON = ":material/restore_from_trash:"
-DATE_FORMAT = "DD/MM/YYYY"
 SEARCH_PLACEHOLDER = "Titre, entreprise, ville, pays ou réf. (VIE243542)"
 # Pause in the typing before the list is filtered.
 SEARCH_DELAY = "300ms"
-
-# Table columns: the rest is in the card. The status, favorite and
-# online state are given by the color of the line.
-TITLE = "Titre"
-COLUMNS = ["Score", TITLE, "Entreprise", "Source", "Ville", "Ajoutée le", "Lettre"]
-# Title of an offer never opened.
-UNREAD_STYLE = "font-weight: bold"
-# Background of a whole line, by marker: light colors with dark text, so
-# that the lines stay readable with the dark theme too.
-TEXT_COLOR = "#1F2937"
-# Same yellow as the « Favori » button of the card.
-FAVORITE_COLOR = offer_card.FAVORITE_COLOR
-# fmt: off
-ROW_STYLES = {
-    browsing.MARKER_REJECTED:    f"background-color: #FDE2E1; color: {TEXT_COLOR}",
-    browsing.MARKER_APPLIED:     f"background-color: #DBEAFE; color: {TEXT_COLOR}",
-    browsing.MARKER_NOT_FOR_ME:  f"background-color: #FFEDD5; color: {TEXT_COLOR}",
-    browsing.MARKER_INTERESTING: f"background-color: #DCFCE7; color: {TEXT_COLOR}",
-    browsing.MARKER_FAVORITE:    f"background-color: {FAVORITE_COLOR}; color: {TEXT_COLOR}",
-    browsing.MARKER_OFFLINE:     "background-color: #E5E7EB; color: #6B7280",
+# Icons of the icon-only buttons, above the list and in the card.
+ICON_SIZE = "1.4rem"
+MORE_FILTERS = "Plus de filtres"
+# Filters of the « Plus de filtres » menu, with their value when unused.
+MORE_FILTER_DEFAULTS = {
+    "letters": [],
+    "sources": [],
+    "countries": [],
+    "min_score": 0,
+    "added_since": None,
 }
-# fmt: on
-# The line whose card is open, above the color of its follow-up.
-OPEN_ROW_STYLE = "background-color: #4F46E5; color: #FFFFFF; font-weight: bold"
-# Widths of the list and of the card beside it.
-LIST_AND_CARD = [3, 2]
-NO_CARD_HINT = "Cliquer sur une ligne pour ouvrir sa fiche."
 
 
 @dataclass(frozen=True)
@@ -88,8 +70,6 @@ class PageSettings:
     favorites_only: bool = False
     # The trash page: hidden offers, which can only be restored.
     in_trash: bool = False
-    # Number of offers of the page in its title (Favoris, Corbeille).
-    count_in_title: bool = False
 
     def state_key(self, name):
         return f"{self.key}_{name}"
@@ -101,50 +81,52 @@ class PageSettings:
     def default_online(self):
         return browsing.ALL if self.in_trash else browsing.ONLINE
 
+    def list_keys(self):
+        return ListKeys(
+            split=self.state_key("split"),
+            list_pane=self.state_key("list_pane"),
+            card_pane=self.state_key("card_pane"),
+        )
+
 
 def show_offer_page(settings):
-    """Show the whole list page: filters, counters, actions and table."""
+    """Show the whole list page: search, filters, list, actions and card."""
     st.session_state.setdefault(settings.state_key("selected"), set())
     with open_database(st.session_state.db_path) as conn:
         offers = list_offers(conn)
         if mark_card_read(conn, settings, offers):
-            # Read again, for the counters and the table.
+            # Read again, for the counters and the list.
             offers = list_offers(conn)
         tags = browsing.duplicate_tags(probable_duplicates(conn))
-    st.title(page_title(settings, offers))
     text = search_bar(settings)
-    offer_filter = filter_sidebar(offers, settings, text)
+    offer_filter, counters_slot = filter_bar(offers, settings, text)
     shown = browsing.filter_offers(offers, offer_filter)
-    show_counters(shown)
+    counters_slot.caption(counters_text(browsing.counters(shown)))
     show_undo(settings)
     card = opened_offer(settings, offers)
-    show_actions(settings, shown, card.id if card else None)
-    # The description beside the list, the follow-up under it: the list
-    # stays visible and clickable. The same columns with or without card,
-    # so that the table is not drawn again from its top on opening one.
-    list_column, card_column = st.columns(LIST_AND_CARD, gap="medium")
-    with list_column:
-        show_table(settings, shown, open_id=card.id if card else None)
+    open_id = card.id if card else None
+    keys = settings.list_keys()
+    st.html(offer_list.split_style(keys, card_open=card is not None))
+    st.html(icon_style(settings))
+    # The same containers with or without card, so that the list keeps
+    # its scroll position on opening one.
+    with st.container(horizontal=True, gap="medium", key=keys.split):
+        with st.container(key=keys.list_pane, gap="small"):
+            show_actions(settings, shown, open_id)
+            show_offers(settings, shown, open_id)
         if card:
-            offer_card.show_follow_up_panel(settings, card, editable=not settings.in_trash)
-    with card_column:
-        if card:
-            show_card(settings, card, shown, tags)
-        else:
-            st.caption(NO_CARD_HINT)
+            with st.container(key=keys.card_pane):
+                show_card(settings, card, shown, tags)
 
 
-def page_title(settings, offers):
-    """Return the title of the page, with its number of offers if wanted."""
-    if not settings.count_in_title:
-        return settings.title
-    whole_page = OfferFilter(
-        statuses=frozenset({None, *STATUSES}),
-        online=browsing.ALL,
-        favorites_only=settings.favorites_only,
-        in_trash=settings.in_trash,
-    )
-    return f"{settings.title} ({len(browsing.filter_offers(offers, whole_page))})"
+def icon_style(settings):
+    """Return the CSS that enlarges the icons of the action bar and of the card's bar.
+
+    The icons are in the labels (Markdown), drawn as span role="img".
+    """
+    bars = [settings.state_key("actions"), settings.state_key("card_toolbar")]
+    selectors = ", ".join(f'.st-key-{bar} [kind="tertiary"] span[role="img"]' for bar in bars)
+    return f"<style>{selectors} {{font-size: {ICON_SIZE};}}</style>"
 
 
 def opened_offer(settings, offers):
@@ -210,63 +192,80 @@ def search_bar(settings):
     )
 
 
-def filter_sidebar(offers, settings, text):
-    """Show the filters in the sidebar and return the chosen OfferFilter.
+def filter_bar(offers, settings, text):
+    """Show the filters on one line; return the chosen OfferFilter and the
+    place of the counters, at the end of the line.
 
-    text: typed in the search bar. The filters are not kept from one
-    opening of the app to the next.
+    The status and online state are always visible, the others in a menu.
+    text: typed in the search bar. The filters are not kept from one opening of the app to
+    the next.
     """
     choices = browsing.filter_choices(offers)
     key = settings.state_key
-    with st.sidebar:
-        st.header("Filtres")
-        statuses = st.multiselect(
+    with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+        statuses = st.pills(
             "Statut",
             STATUS_CHOICES,
+            selection_mode="multi",
             default=sorted(map(to_widget_code, settings.default_statuses()), key=status_order),
             format_func=status_choice_label,
-            placeholder="Tous",
+            label_visibility="collapsed",
             key=key("statuses"),
-        )
-        letters = st.multiselect(
-            "Lettre",
-            LETTER_CHOICES,
-            format_func=letter_choice_label,
-            placeholder="Toutes",
-            key=key("letters"),
         )
         online = st.segmented_control(
             "En ligne",
             list(ONLINE_LABELS),
             default=settings.default_online(),
             format_func=ONLINE_LABELS.get,
+            label_visibility="collapsed",
             key=key("online"),
         )
-        sources = st.multiselect(
-            "Source",
-            choices.sources,
-            format_func=source_label,
-            placeholder="Toutes",
-            key=key("sources"),
+        with st.popover(more_filters_label(settings), icon=":material/filter_list:"):
+            letters = st.multiselect(
+                "Lettre",
+                LETTER_CHOICES,
+                format_func=letter_choice_label,
+                placeholder="Toutes",
+                key=key("letters"),
+            )
+            sources = st.multiselect(
+                "Source",
+                choices.sources,
+                format_func=source_label,
+                placeholder="Toutes",
+                key=key("sources"),
+            )
+            countries = st.multiselect(
+                "Pays", choices.countries, placeholder="Tous", key=key("countries")
+            )
+            min_score = st.number_input("Score minimum", min_value=0, step=1, key=key("min_score"))
+            added_since = st.date_input(
+                "Ajoutée depuis le", value=None, format="DD/MM/YYYY", key=key("added_since")
+            )
+        offer_filter = make_filter(
+            settings,
+            text=text,
+            statuses=statuses,
+            letters=letters,
+            online=online,
+            sources=sources,
+            countries=countries,
+            min_score=min_score,
+            added_since=added_since,
         )
-        countries = st.multiselect(
-            "Pays", choices.countries, placeholder="Tous", key=key("countries")
-        )
-        min_score = st.number_input("Score minimum", min_value=0, step=1, key=key("min_score"))
-        added_since = st.date_input(
-            "Ajoutée depuis le", value=None, format="DD/MM/YYYY", key=key("added_since")
-        )
-    return make_filter(
-        settings,
-        text=text,
-        statuses=statuses,
-        letters=letters,
-        online=online,
-        sources=sources,
-        countries=countries,
-        min_score=min_score,
-        added_since=added_since,
+        st.space("stretch")
+        # Filled once the offers are filtered.
+        counters_slot = st.empty()
+    return offer_filter, counters_slot
+
+
+def more_filters_label(settings):
+    """Label of the filters menu, with the number of filters in use."""
+    used = sum(
+        st.session_state.get(settings.state_key(name), unused) not in (unused, None)
+        for name, unused in MORE_FILTER_DEFAULTS.items()
     )
+    return f"{MORE_FILTERS} ({used})" if used else MORE_FILTERS
 
 
 def make_filter(
@@ -304,20 +303,48 @@ def status_order(code):
     return STATUS_CHOICES.index(code)
 
 
-# --- Counters -----------------------------------------------------------------
+def counters_text(numbers):
+    """Return the counters of the offers shown, on one line."""
+    parts = [
+        f"**{numbers.total}** offres",
+        f"**{numbers.unread}** non lues",
+        f"**{numbers.by_status.get('applied', 0)}** postulées",
+        f"**{numbers.letters_to_write}** lettres à rédiger",
+    ]
+    return " · ".join(parts)
 
 
-def show_counters(shown):
-    """Show the counters of the offers shown."""
-    numbers = browsing.counters(shown)
-    metrics = {
-        "Offres": numbers.total,
-        "Non lues": numbers.unread,
-        "Postulées": numbers.by_status.get("applied", 0),
-        "Lettres à rédiger": numbers.letters_to_write,
-    }
-    for column, (label, value) in zip(st.columns(len(metrics)), metrics.items()):
-        column.metric(label, value, border=True)
+# --- List ---------------------------------------------------------------------
+
+
+def show_offers(settings, shown, open_id):
+    """Show the lines of the offers shown, or why there is none."""
+    if not shown:
+        st.info("Aucune offre ne correspond aux filtres.", icon=":material/filter_alt_off:")
+        return
+    favorites = {stored.id: stored.favorite for stored in shown}
+    offer_list.show_list(
+        settings.state_key("list"),
+        offer_list.list_rows(shown, on_favorites_page=settings.favorites_only),
+        st.session_state[settings.state_key("selected")],
+        open_id,
+        settings.list_keys(),
+        ListEvents(
+            checked=state_setter(settings.state_key("selected")),
+            opened=lambda offer_id: offer_card.open_card(settings, offer_id),
+            starred=lambda offer_id: offer_card.switch_favorite(offer_id, not favorites[offer_id]),
+        ),
+        stars=not settings.in_trash,
+    )
+
+
+def state_setter(state_key) -> Callable:
+    """Return a function that keeps its argument under state_key."""
+
+    def setter(value):
+        st.session_state[state_key] = value
+
+    return setter
 
 
 # --- Actions ------------------------------------------------------------------
@@ -335,7 +362,7 @@ def show_actions(settings, shown, open_id=None):
     # Once the open offer leaves the list, the card goes to the next one.
     leaving = {"move_card": True, "next_card": next_card(targets, open_id, shown_ids)}
     key = settings.state_key
-    with st.container(horizontal=True, vertical_alignment="center"):
+    with st.container(horizontal=True, vertical_alignment="center", key=key("actions")):
         st.caption(targets_caption(checked & set(shown_ids), targets))
         if settings.in_trash:
             action_button(settings, "Restaurer", RESTORE_ICON, targets, restore, **leaving)
@@ -360,19 +387,47 @@ def show_actions(settings, shown, open_id=None):
             on_click=act_from_menu,
             args=(settings, key("letter_menu"), targets, write_letter_status),
         )
-        action_button(settings, "Favori", ":material/star:", targets, add_favorite)
-        action_button(settings, "Retirer des favoris", ":material/star_border:", targets,
-                      remove_favorite)  # fmt: skip
+        show_group_favorite(settings, shown, targets)
         action_button(settings, "Marquer comme lu", ":material/done:", targets, mark_read)
         action_button(settings, "Corbeille", TRASH_ICON, targets, hide, trashed=True, **leaving)
         st.button(
-            "Tout marquer comme lu",
-            icon=":material/done_all:",
+            ":material/done_all:",
+            help="Tout marquer comme lu",
+            type="tertiary",
             disabled=not shown,
             key=key("read_all"),
             on_click=act,
             args=(settings, mark_read, sorted(shown_ids)),
         )
+
+
+def show_group_favorite(settings, shown, targets):
+    """One star for the favorites: yellow when all the targets are favorites.
+
+    A click removes them from the favorites then; else all become favorites.
+    """
+    write = favorite_write(targets, {stored.id for stored in shown if stored.favorite})
+    key = settings.state_key("group_favorite")
+    if write is remove_favorite:
+        st.html(offer_card.favorite_style(key))
+    st.button(
+        ":material/star:" if write is remove_favorite else ":material/star_border:",
+        help="Retirer des favoris" if write is remove_favorite else "Favori",
+        type="tertiary",
+        disabled=not targets,
+        key=key,
+        on_click=act,
+        args=(settings, write, targets),
+    )
+
+
+def favorite_write(targets, favorite_ids):
+    """Return the write of the star: remove_favorite if all the targets are
+    favorites, else add_favorite (a mix becomes all favorites).
+    """
+    if targets and set(targets) <= favorite_ids:
+        return remove_favorite
+    return add_favorite
 
 
 def action_targets(checked, open_id, shown_ids):
@@ -405,13 +460,14 @@ def next_card(targets, open_id, shown_ids):
 
 
 def action_button(settings, label, icon, targets, write, **options):
-    """Button that applies write(conn, ids, now) to the target offers.
+    """Icon button that applies write(conn, ids, now) to the target offers.
 
-    options: those of act.
+    label: shown on hovering it. options: those of act.
     """
     st.button(
-        label,
-        icon=icon,
+        icon,
+        help=label,
+        type="tertiary",
         disabled=not targets,
         key=settings.state_key(label),
         on_click=act,
@@ -445,6 +501,8 @@ def act_from_menu(settings, menu_key, offer_ids, write):
 def act(settings, write: Callable, offer_ids, trashed=False, move_card=False, next_card=None):
     """Write an action, uncheck everything, and keep the trash to undo it.
 
+    A callback, so that the list drawn after it shows the change.
+
     move_card: the offers leave the list; the card then shows next_card,
     or closes if None.
     """
@@ -455,26 +513,10 @@ def act(settings, write: Callable, offer_ids, trashed=False, move_card=False, ne
     offer_card.refresh_fields(settings, changed)
     st.session_state[settings.state_key("selected")] = set()
     st.session_state[settings.state_key("trashed")] = list(offer_ids) if trashed else None
-    uncheck_table(settings)
     if move_card and next_card is None:
         offer_card.close_card(settings)
     elif move_card:
         offer_card.open_card(settings, next_card)
-
-
-def uncheck_table(settings):
-    """Uncheck the boxes of the table shown, to match the empty selection."""
-    reset_table(settings, [])
-
-
-def reset_table(settings, rows):
-    """Set the selection of the table: rows checked, no cell clicked.
-
-    The browser ignores a selection equal to the last one sent, so the
-    clicked cell is kept between clicks, and only cleared when needed.
-    """
-    st.session_state[table_key(settings)] = {"selection": {"rows": rows, "cells": []}}
-    st.session_state[settings.state_key("clicked")] = None
 
 
 def show_undo(settings):
@@ -491,139 +533,3 @@ def show_undo(settings):
             on_click=act,
             args=(settings, restore, trashed),
         )
-
-
-# --- Table --------------------------------------------------------------------
-
-
-def show_table(settings, shown, open_id=None):
-    """Show the offers as read-only lines, colored by their follow-up, the
-    titles of the unread ones in bold.
-
-    The boxes on the left check offers for the actions; a click on a cell
-    opens the card of its line. open_id: offer whose card is open, its
-    line is highlighted.
-    """
-    if not shown:
-        st.info("Aucune offre ne correspond aux filtres.", icon=":material/filter_alt_off:")
-        return
-    row_ids = [stored.id for stored in shown]
-    key = table_key(settings)
-    checked = st.session_state[settings.state_key("selected")]
-    previous_ids = st.session_state.get(settings.state_key("rows"))
-    clicked = st.session_state.get(settings.state_key("clicked"))
-    # The table selects rows by their number: after a change of the lines,
-    # the same numbers would point to other offers. A cell clicked on
-    # another line than the open one (card closed, arrows) is cleared, so
-    # that it can open its offer again.
-    if (
-        key not in st.session_state
-        or previous_ids != row_ids
-        or (clicked is not None and row_ids[clicked[0]] != open_id)
-    ):
-        reset_table(settings, checked_rows(row_ids, checked))
-    # The callback finds the offers from the row numbers.
-    st.session_state[settings.state_key("rows")] = row_ids
-    frame = table_frame(shown)
-    open_row = row_ids.index(open_id) if open_id in row_ids else None
-    markers = table_markers(shown, on_favorites_page=settings.favorites_only)
-    unread = [browsing.is_unread(stored) for stored in shown]
-    st.dataframe(
-        frame.style.apply(row_styles, axis=1, markers=markers, unread=unread, open_row=open_row),
-        key=key,
-        # st.dataframe takes no args for its callback.
-        on_select=partial(on_table_select, settings, key),
-        selection_mode=["multi-row", "single-cell"],
-        hide_index=True,
-        column_config=column_config(),
-        alt="Offres filtrées, avec leur suivi",
-    )
-
-
-def table_key(settings):
-    """Key of the table: always the same, so that it keeps its scroll position."""
-    return settings.state_key("table")
-
-
-def checked_rows(row_ids, checked):
-    """Return the numbers of the rows whose offer is checked."""
-    return [number for number, offer_id in enumerate(row_ids) if offer_id in checked]
-
-
-def column_config():
-    return {
-        "Score": st.column_config.NumberColumn("Score", width="small"),
-        TITLE: st.column_config.TextColumn(TITLE, width="large", pinned=True),
-        "Ajoutée le": st.column_config.DateColumn("Ajoutée le", format=DATE_FORMAT),
-    }
-
-
-def table_markers(shown, on_favorites_page=False):
-    """Return the marker of each offer shown, which gives the color of its line."""
-    return [browsing.marker(stored, on_favorites_page) for stored in shown]
-
-
-def table_frame(shown):
-    """Return the table of the offers shown, one row per offer, in their order."""
-    return pd.DataFrame([table_row(stored) for stored in shown], columns=COLUMNS)
-
-
-def table_row(stored):
-    offer = stored.offer
-    return {
-        "Score": stored.score,
-        TITLE: offer.title,
-        "Entreprise": offer.company,
-        "Source": source_label(offer.source),
-        "Ville": offer.city,
-        "Ajoutée le": stored.first_seen.date(),
-        "Lettre": letter_label(stored.letter_status) if stored.letter_status else None,
-    }
-
-
-def row_styles(row, markers, unread, open_row=None):
-    """Return the CSS of each cell of a table row: the color of its marker,
-    and the title in bold if unread.
-
-    markers, unread: marker and unread state of each row; row.name is its number.
-    open_row: number of the row whose card is open, highlighted instead.
-    """
-    if row.name == open_row:
-        return [OPEN_ROW_STYLE] * len(row)
-    styles = [ROW_STYLES.get(markers[row.name], "")] * len(row)
-    if unread[row.name]:
-        title = COLUMNS.index(TITLE)
-        styles[title] = "; ".join(part for part in (styles[title], UNREAD_STYLE) if part)
-    return styles
-
-
-def on_table_select(settings, key):
-    """Callback of the table: keep the checked offers, open the clicked one."""
-    selection = st.session_state[key].selection
-    row_ids = st.session_state[settings.state_key("rows")]
-    checked, opened = read_selection(row_ids, selection.rows, selection.cells)
-    st.session_state[settings.state_key("selected")] = checked
-    cell = tuple(selection.cells[0]) if selection.cells else None
-    if is_new_click(cell, st.session_state.get(settings.state_key("clicked"))):
-        offer_card.open_card(settings, opened)
-    st.session_state[settings.state_key("clicked")] = cell
-
-
-def is_new_click(cell, clicked):
-    """Tell whether cell (row number, column) was just clicked.
-
-    clicked: the cell already selected. It stays selected after its click,
-    and a change of the checked boxes sends it again.
-    """
-    return cell is not None and cell != clicked
-
-
-def read_selection(row_ids, rows, cells):
-    """Return (checked offer ids, id of the clicked offer or None).
-
-    row_ids: offer id of each row of the table.
-    rows: numbers of the checked rows; cells: (row number, column) clicked.
-    """
-    checked = {row_ids[row] for row in rows}
-    opened = row_ids[cells[0][0]] if cells else None
-    return checked, opened

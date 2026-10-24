@@ -1,10 +1,10 @@
-"""Card of one offer: everything about it, and its follow-up to edit.
+"""Card of one offer: its follow-up to edit, then everything about it.
 
-Shown in the page, not in a st.dialog (which greys the page behind it):
-the description beside the list, the follow-up under the list. The list
-stays visible and clickable, with the line of the card highlighted.
-Opening the card marks the offer as read (offer_table). Each change of
-the follow-up is saved at once: the user is alone, no « Enregistrer ».
+Shown beside the list, not in a st.dialog (which greys the page behind
+it): the list stays visible and clickable, with the line of the card
+highlighted. Opening the card marks the offer as read (offer_table). Each
+change of the follow-up is saved at once: the user is alone, no
+« Enregistrer ».
 """
 
 from collections.abc import Callable
@@ -87,26 +87,26 @@ def close_card(settings):
 
 
 def show_card(settings, stored, duplicates, action, editable=True, navigation=None):
-    """Show the card of a StoredOffer, in the current column.
+    """Show the card of a StoredOffer, in the current container.
 
     duplicates: references of its probable duplicates.
     action: CardAction of the button at the top (« Mettre à la corbeille »,
         « Restaurer »); the card then goes to the next offer shown.
-    editable: False hides the favorite button (trash).
+    editable: False shows the follow-up without fields, and no favorite
+        button (trash).
     navigation: Navigation for the arrows; None hides them (offer no
         longer shown, after a change of its status for example).
-    The follow-up is shown apart, by show_follow_up_panel.
     """
-    with st.container(border=True):
-        show_header(settings, stored, navigation, editable, action)
-        show_summary(stored, duplicates)
+    show_toolbar(settings, stored, navigation, editable, action)
+    st.subheader(stored.offer.title)
+    st.caption(" · ".join(part for part in (stored.offer.company, place(stored.offer)) if part))
+    show_follow_up_panel(settings, stored, editable)
+    show_summary(stored, duplicates)
 
 
 def show_follow_up_panel(settings, stored, editable=True):
     """Follow-up of the open offer: the form, or only its values (trash)."""
     with st.container(border=True):
-        # A short heading: the title of the offer is already beside the list.
-        st.markdown(f"**Suivi** · {stored.offer.title}")
         if st.session_state.pop(settings.state_key("card_saved"), False):
             st.toast("Suivi enregistré.", icon=":material/check_circle:")
         if editable:
@@ -115,24 +115,37 @@ def show_follow_up_panel(settings, stored, editable=True):
             show_follow_up(stored)
 
 
-def show_header(settings, stored, navigation, editable, action):
-    """Title, « Fermer », arrows, then the favorite and action buttons."""
-    with st.container(horizontal=True, vertical_alignment="center"):
-        st.subheader(stored.offer.title)
+def show_toolbar(settings, stored, navigation, editable, action):
+    """Arrows on the left; favorite, action, website and « Fermer » on the right.
+
+    Icons only, their name shown on hovering them.
+    """
+    with st.container(
+        horizontal=True,
+        vertical_alignment="center",
+        gap="xsmall",
+        key=settings.state_key("card_toolbar"),
+    ):
+        if navigation:
+            show_arrows(settings, navigation)
+        st.space("stretch")
+        if editable:
+            show_favorite_button(settings, stored)
+        show_action(settings, stored, action, following_offer(navigation))
+        st.link_button(
+            ":material/open_in_new:",
+            stored.offer.url,
+            help="Voir l'offre sur le site",
+            type="tertiary",
+        )
         st.button(
-            "Fermer",
-            icon=":material/close:",
+            ":material/close:",
+            help="Fermer",
             type="tertiary",
             key=settings.state_key("card_close"),
             on_click=close_card,
             args=(settings,),
         )
-    if navigation:
-        show_arrows(settings, navigation)
-    with st.container(horizontal=True, vertical_alignment="center"):
-        if editable:
-            show_favorite_button(settings, stored)
-        show_action(settings, stored, action, following_offer(navigation))
 
 
 def following_offer(navigation):
@@ -146,13 +159,14 @@ def following_offer(navigation):
 
 
 def show_favorite_button(settings, stored):
-    """« Favori » switches the favorite at once; yellow when it is one."""
+    """The star switches the favorite at once; yellow when it is one."""
     key = settings.state_key("card_favorite")
     if stored.favorite:
         st.html(favorite_style(key))
     st.button(
-        "Favori",
-        icon=":material/star:" if stored.favorite else ":material/star_border:",
+        ":material/star:" if stored.favorite else ":material/star_border:",
+        help="Retirer des favoris" if stored.favorite else "Favori",
+        type="tertiary",
         key=key,
         on_click=switch_favorite,
         args=(stored.id, not stored.favorite),
@@ -174,8 +188,9 @@ def switch_favorite(offer_id, favorite):
 
 def show_action(settings, stored, action, following_id):
     st.button(
-        action.label,
-        icon=action.icon,
+        action.icon,
+        help=action.label,
+        type="tertiary",
         key=settings.state_key("card_action"),
         on_click=run_action,
         args=(settings, action, stored.id, following_id),
@@ -203,33 +218,32 @@ def go_to(settings, offer_id):
 
 def show_arrows(settings, navigation):
     """Buttons to the previous and next offers shown, and the position."""
-    with st.container(horizontal=True, vertical_alignment="center"):
-        st.button(
-            "Précédente",
-            icon=":material/chevron_left:",
-            disabled=navigation.previous is None,
-            key=settings.state_key("card_previous"),
-            on_click=go_to,
-            args=(settings, navigation.previous),
-        )
-        st.caption(f"{navigation.position} / {navigation.total}")
-        st.button(
-            "Suivante",
-            icon=":material/chevron_right:",
-            disabled=navigation.next is None,
-            key=settings.state_key("card_next"),
-            on_click=go_to,
-            args=(settings, navigation.next),
-        )
+    st.button(
+        ":material/chevron_left:",
+        help="Précédente",
+        type="tertiary",
+        disabled=navigation.previous is None,
+        key=settings.state_key("card_previous"),
+        on_click=go_to,
+        args=(settings, navigation.previous),
+    )
+    st.caption(f"{navigation.position} / {navigation.total}", width="content")
+    st.button(
+        ":material/chevron_right:",
+        help="Suivante",
+        type="tertiary",
+        disabled=navigation.next is None,
+        key=settings.state_key("card_next"),
+        on_click=go_to,
+        args=(settings, navigation.next),
+    )
 
 
 def show_summary(stored, duplicates):
     """Show what is known about the offer."""
     offer = stored.offer
-    st.caption(" · ".join(part for part in (offer.company, place(offer)) if part))
     if duplicates:
         st.warning(f"Doublon probable de {', '.join(duplicates)}", icon=":material/content_copy:")
-    st.link_button("Voir l'offre sur le site", offer.url, icon=":material/open_in_new:")
     st.table(details(stored), border="horizontal", width="content")
     score = MISSING if stored.score is None else stored.score
     st.metric("Score par mots-clés", score)
@@ -295,13 +309,13 @@ def show_follow_up_form(settings, stored):
     The notes are saved when the field is left (or Ctrl+Entrée).
     """
     key = partial(field_key, settings, stored.id)
+    init_fields(settings, stored)
     save = {"on_change": save_fields, "args": (settings, stored)}
     # Statut, Lettre and Postulé le on one line; then Notes.
     status_column, letter_column, date_column = st.columns(3)
     status_column.selectbox(
         "Statut",
         STATUS_CHOICES,
-        index=STATUS_CHOICES.index(to_widget_code(stored.status)),
         format_func=status_choice_label,
         key=key("status"),
         **save,
@@ -309,14 +323,12 @@ def show_follow_up_form(settings, stored):
     letter_column.selectbox(
         "Lettre",
         LETTER_CHOICES,
-        index=LETTER_CHOICES.index(to_widget_code(stored.letter_status)),
         format_func=letter_choice_label,
         key=key("letter"),
         **save,
     )
     date_column.date_input(
         "Postulé le",
-        value=as_date(stored.applied_on),
         format=DATE_INPUT_FORMAT,
         key=key("applied_on"),
         **save,
@@ -326,7 +338,24 @@ def show_follow_up_form(settings, stored):
             f"Date tapée dans l'ancien Excel : « {stored.applied_on} ». "
             "Elle est gardée tant qu'aucune date n'est choisie."
         )
-    st.text_area("Notes", value=stored.notes or "", height=NOTES_HEIGHT, key=key("notes"), **save)
+    st.text_area("Notes", height=NOTES_HEIGHT, key=key("notes"), **save)
+
+
+def init_fields(settings, stored):
+    """Fill the fields from the database the first time the card is shown.
+
+    Through the session state only, not the widgets' defaults:
+    refresh_fields also sets these keys, and Streamlit warns when a widget
+    gets both.
+    """
+    values = {
+        "status": to_widget_code(stored.status),
+        "letter": to_widget_code(stored.letter_status),
+        "applied_on": as_date(stored.applied_on),
+        "notes": stored.notes or "",
+    }
+    for name, value in values.items():
+        st.session_state.setdefault(field_key(settings, stored.id, name), value)
 
 
 def save_fields(settings, stored):

@@ -29,6 +29,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "offers.storage" = ["schema.sql", "migrations/*.sql"]
+"offers.ui" = ["offer_list.js", "offer_list.css"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

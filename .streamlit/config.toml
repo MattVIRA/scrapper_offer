@@ -4,3 +4,17 @@ address = "localhost"
 
 [browser]
 gatherUsageStats = false
+
+# No « Deploy » button: the app is personal.
+[client]
+toolbarMode = "minimal"
+
+# Dense, mailbox-like pages: smaller text and headings, little space on top.
+[theme]
+primaryColor = "#4F46E5"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+baseFontSize = 14
+headingFontSizes = ["1.6rem", "1.25rem", "1.1rem", "1rem", "0.9rem", "0.8rem"]
+headingFontWeights = [700, 600, 600, 600, 600, 600]
+paddingTop = "0.75rem"
+paddingBottom = "0.5rem"

@@ -16,8 +16,11 @@ pastilles des listes, sans Streamlit), `pipeline.py` (orchestrateur),
 - `app.py` : point d'entrée, navigation, erreurs du projet affichées ;
 - `app_pages/` : une page par script (Offres, Favoris, Corbeille,
   Collecte), qui ne fait qu'appeler les modules ci-dessous ;
-- `offer_table.py` : liste commune aux pages Offres, Favoris et
-  Corbeille (`PageSettings`) ; `offer_card.py` : fiche d'une offre ;
+- `offer_table.py` : page commune à Offres, Favoris et Corbeille
+  (`PageSettings`) : recherche, filtres sur une ligne, actions ;
+  `offer_list.py` (+ `offer_list.js`, `offer_list.css`) : liste façon
+  messagerie, composant `st.components.v2`, et barre qui règle sa
+  largeur à côté de la fiche ; `offer_card.py` : fiche d'une offre ;
 - `collect_job.py` : collecte dans un fil de fond ; `session.py` :
   chemins et ouverture de la base ; `labels.py` : choix de statut et de
   lettre.
@@ -54,12 +57,12 @@ lancer sans accord sur ses fichiers. Les tests suffisent pour vérifier.
 
 **Tester l'interface.** `AppTest` (`streamlit.testing.v1`), sans
 navigateur, sur une base dans `tmp_path`, jamais la vraie (ne pas lancer
-l'app sans `--db`). `AppTest` ne sait ni cocher une ligne ni cliquer une
-cellule d'un `st.dataframe` : les offres cochées sont dans
-`st.session_state["<page>_selected"]`, la fiche ouverte dans
-`"<page>_card"` (les tests les remplissent), et le décodage d'un clic
-passe par `offer_table.read_selection`, testée avec pytest. Ces gestes
-sont à faire vérifier par l'utilisateur. Un bouton qui modifie l'état
+l'app sans `--db`). `AppTest` n'exécute pas le JavaScript de la liste :
+les tests lisent les lignes qu'elle reçoit (`at.get("bidi_component")`),
+les offres cochées sont dans `st.session_state["<page>_selected"]`, la
+fiche ouverte dans `"<page>_card"` (les tests les remplissent). Cocher,
+ouvrir, l'étoile et la barre de largeur sont à faire vérifier par
+l'utilisateur. Un bouton qui modifie l'état
 d'un widget déjà affiché (décocher le tableau) passe par un rappel
 (`on_click`), exécuté avant l'affichage.
 La logique sans Streamlit (`browsing.py`, `summary.py`) se teste avec

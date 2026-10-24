@@ -16,7 +16,15 @@ from offers.storage.database import connect, hide, save_source_result, save_trac
 from offers.ui import offer_card
 from offers.ui.offer_table import PageSettings
 from tests.factories import make_stored
-from tests.test_ui_offers import TIMEOUT, button, by_reference, metrics, offer, table
+from tests.test_ui_offers import (
+    TIMEOUT,
+    button,
+    by_reference,
+    counters,
+    list_data,
+    offer,
+    titles,
+)
 
 NOW = datetime(2026, 10, 22, 9, 30)
 CARD = "offers_card"
@@ -89,7 +97,7 @@ def test_opening_the_card_marks_the_offer_as_read(start, db_path, ids):
 
     assert by_reference(db_path)["VIE1"].read_at is not None
     assert by_reference(db_path)["VIE2"].read_at is None
-    assert metrics(at)["Non lues"] == "2"
+    assert "**2** non lues" in counters(at)
 
 
 def test_card_of_an_unknown_offer_is_closed(start):
@@ -264,11 +272,27 @@ def texts(elements):
 def test_card_is_beside_the_list(start, ids):
     at = start(ids["VIE2"])
 
-    # The list stays shown with the card.
-    assert list(table(at)["Titre"]) == ["Data analyst", "Comptable", "Comptable"]
-    # The follow-up under the list, the description beside it.
-    assert "**Suivi** · Comptable" in [m.value for m in at.markdown]
+    # The list stays shown with the card, its line highlighted.
+    assert titles(at) == ["Data analyst", "Comptable", "Comptable"]
+    assert list_data(at)["open"] == ids["VIE2"]
+    # The follow-up at the top of the card, under its title.
     assert at.subheader[0].value == "Comptable"
+    assert at.selectbox(key=field(ids, "VIE2", "status"))
+
+
+def test_card_toolbar_has_only_icons(start, ids):
+    at = start(ids["VIE2"])
+    names = {
+        "offers_card_previous": "Précédente",
+        "offers_card_next": "Suivante",
+        "offers_card_favorite": "Favori",
+        "offers_card_action": "Mettre à la corbeille",
+        "offers_card_close": "Fermer",
+    }
+    for key, help_text in names.items():
+        assert at.button(key=key).label.startswith(":material/")
+        assert at.button(key=key).help == help_text
+    assert at.link_button[0].help == "Voir l'offre sur le site"
 
 
 def test_close_button(start, ids):
@@ -281,13 +305,13 @@ def test_close_button(start, ids):
 def test_favorite_button_writes_at_once(start, db_path, ids):
     at = start(ids["VIE1"])
     favorite_style = offer_card.favorite_style("offers_card_favorite")
-    assert at.button(key="offers_card_favorite").label == "Favori"
+    assert at.button(key="offers_card_favorite").help == "Favori"
     assert favorite_style not in texts(at.get("html"))
 
     at.button(key="offers_card_favorite").click().run()
 
     assert by_reference(db_path)["VIE1"].favorite
-    assert at.button(key="offers_card_favorite").label == "Favori"
+    assert at.button(key="offers_card_favorite").help == "Retirer des favoris"
     # Yellow, as the line of a favorite in the list.
     assert favorite_style in texts(at.get("html"))
     assert offer_card.FAVORITE_COLOR in favorite_style

@@ -1,23 +1,24 @@
-"""Tests of the « Offres » page and of its shared table module.
+"""Tests of the « Offres » page and of its shared list module.
 
-AppTest cannot check a row nor click a cell of st.dataframe: the checked
-offers and the open card are set in the session state, and the decoding
-of a click is tested through read_selection.
+AppTest cannot run the list component (JavaScript): the tests read the
+lines it is given, and set the checked offers and the open card in the
+session state, as the component's callbacks do.
 """
 
+import json
 import sys
 from datetime import date, datetime
 
-import pandas as pd
 import pytest
+from streamlit.elements.lib import policies
 from streamlit.testing.v1 import AppTest
 
 from offers import browsing
 from offers.__main__ import UI_APP
 from offers.sources.base import FoundOffer
 from offers.storage.database import connect, list_offers, save_source_result, set_status
-from offers.ui import labels, offer_card, offer_table
-from offers.ui.offer_table import PageSettings, make_filter, read_selection, table_frame
+from offers.ui import labels, offer_card, offer_list, offer_table
+from offers.ui.offer_table import PageSettings, make_filter
 from tests.factories import make_offer, make_stored
 
 NOW = datetime(2026, 10, 22, 9, 30)
@@ -74,60 +75,71 @@ def at(monkeypatch, db_path):
     return AppTest.from_file(str(UI_APP), default_timeout=TIMEOUT).run()
 
 
-def table(at):
-    return at.dataframe[0].value
+def list_data(at):
+    """Return the data given to the list component, or None without a list."""
+    lists = at.get("bidi_component")
+    return json.loads(lists[0].proto.json) if lists else None
 
 
-def metrics(at):
-    return {m.label: m.value for m in at.metric}
+def titles(at):
+    data = list_data(at)
+    return [row["title"] for row in data["rows"]] if data else []
+
+
+def counters(at):
+    """Return the line of the counters."""
+    return next(c.value for c in at.caption if " offres · " in c.value)
 
 
 def button(at, label):
-    return next(b for b in at.button if b.label == label)
+    """Return the button of this name: shown as its label, or on hovering an icon."""
+    return next(b for b in at.button if label in (b.label, b.help))
 
 
 # --- Page ---------------------------------------------------------------------
 
 
-def test_page_shows_counters_and_table(at):
+def test_page_shows_counters_and_list(at):
     assert not at.exception
     # Default filter: online offers only.
-    assert list(table(at)["Titre"]) == ["Data analyst", "Poste 2", "Poste 3"]
-    assert metrics(at) == {
-        "Offres": "3",
-        "Non lues": "3",
-        "Postulées": "0",
-        "Lettres à rédiger": "0",
-    }
+    assert titles(at) == ["Data analyst", "Poste 2", "Poste 3"]
+    assert counters(at) == (
+        "**3** offres · **3** non lues · **0** postulées · **0** lettres à rédiger"
+    )
+
+
+def test_no_sidebar_and_no_title(at):
+    # Search, filters and counters stay on top of the list.
+    assert not at.sidebar.children
+    assert not at.title
 
 
 def test_filters_change_the_table(at):
     at.text_input(key="offers_text").set_value("data").run()
-    assert list(table(at)["Titre"]) == ["Data analyst"]
+    assert titles(at) == ["Data analyst"]
 
     at.text_input(key="offers_text").set_value("").run()
     at.segmented_control(key="offers_online").set_value(browsing.ALL).run()
-    assert len(table(at)) == 4
+    assert len(titles(at)) == 4
 
     at.number_input(key="offers_min_score").set_value(1).run()
-    assert list(table(at)["Titre"]) == ["Data analyst"]
-    assert metrics(at)["Offres"] == "1"
+    assert titles(at) == ["Data analyst"]
+    assert "**1** offres" in counters(at)
 
 
 def test_search_by_reference_finds_an_offline_offer(at):
     # VIE4 is offline, hidden by the default filter.
     at.text_input(key="offers_text").set_value("vie4").run()
-    assert list(table(at)["Titre"]) == ["Poste 4"]
+    assert titles(at) == ["Poste 4"]
 
 
 def test_search_bar_is_above_the_list(at):
-    assert "offers_text" not in [w.key for w in at.sidebar.text_input]
     assert at.text_input(key="offers_text").placeholder == offer_table.SEARCH_PLACEHOLDER
 
 
 def test_no_offer_left(at):
     at.text_input(key="offers_text").set_value("introuvable").run()
-    assert not at.dataframe
+    assert list_data(at) is None
     assert "Aucune offre" in at.info[0].value
 
 
@@ -137,7 +149,7 @@ def test_status_saved_in_the_database_is_shown(at, db_path, ids):
     conn.close()
 
     at.run()
-    assert metrics(at)["Postulées"] == "1"
+    assert "**1** postulées" in counters(at)
 
 
 # --- Actions on the checked offers --------------------------------------------
@@ -156,10 +168,9 @@ def test_group_status_only_changes_the_checked_offers(at, db_path, ids):
         "VIE3": "rejected",
         "VIE4": None,
     }
-    # Everything is unchecked after an action.
+    # Everything is unchecked after an action, the boxes of the list too.
     assert at.session_state[SELECTED] == set()
-    # The boxes of the table are unchecked too.
-    assert at.session_state["offers_table"]["selection"]["rows"] == []
+    assert list_data(at)["checked"] == []
 
 
 def test_group_letter_and_favorite(at, db_path, ids):
@@ -172,7 +183,7 @@ def test_group_letter_and_favorite(at, db_path, ids):
 
     second = by_reference(db_path)["VIE2"]
     assert (second.letter_status, second.favorite) == ("to_write", True)
-    assert metrics(at)["Lettres à rédiger"] == "1"
+    assert "**1** lettres à rédiger" in counters(at)
 
 
 def test_checked_offer_hidden_by_a_filter_is_not_changed(at, db_path, ids):
@@ -263,13 +274,13 @@ def test_trash_then_undo(at, db_path, ids):
     button(at, "Corbeille").click().run()
 
     assert by_reference(db_path)["VIE2"].hidden
-    assert list(table(at)["Titre"]) == ["Data analyst", "Poste 3"]
+    assert titles(at) == ["Data analyst", "Poste 3"]
     assert at.success[0].value == "1 offres mises à la corbeille"
 
     button(at, "Annuler").click().run()
 
     assert not by_reference(db_path)["VIE2"].hidden
-    assert len(table(at)) == 3
+    assert len(titles(at)) == 3
     assert not at.success
 
 
@@ -287,153 +298,93 @@ def test_mark_all_shown_as_read(at, db_path):
 
     stored = by_reference(db_path)
     assert [stored[r].read_at is None for r in ("VIE1", "VIE2", "VIE3")] == [True, False, False]
-    assert metrics(at)["Non lues"] == "0"
+    assert "**0** non lues" in counters(at)
 
 
-# --- Table and filters, without Streamlit -------------------------------------
+# --- List ---------------------------------------------------------------------
 
 
-def test_table_frame():
-    first = make_stored(
-        1,
-        status="rejected",
-        letter_status="written",
-        favorite=True,
-        read_at=NOW,
-        score=3,
-    )
-    second = make_stored(2, online=False)
-
-    frame = table_frame([first, second])
-
-    # Read-only lines: the rest (status, favorite, online, reference) is
-    # in the card and in the color of the line.
-    assert list(frame.columns) == offer_table.COLUMNS
-    assert frame.to_dict("records")[0] == {
-        "Score": 3,
-        "Titre": "Data Analyst",
-        "Entreprise": "ACME",
-        "Source": "test",
-        "Ville": "PARIS",
-        "Ajoutée le": date(2026, 10, 20),
-        "Lettre": "Rédigée",
-    }
-    assert pd.isna(frame.to_dict("records")[1]["Lettre"])
-
-
-def test_table_markers():
-    shown = [make_stored(1, favorite=True), make_stored(2, status="applied", favorite=True)]
-    assert offer_table.table_markers(shown) == [browsing.MARKER_FAVORITE, browsing.MARKER_APPLIED]
-    # No yellow on the Favorites page; blue stays.
-    assert offer_table.table_markers(shown, on_favorites_page=True) == [
-        browsing.NO_MARKER,
-        browsing.MARKER_APPLIED,
-    ]
-
-
-@pytest.mark.parametrize(
-    "changes, color",
-    [
-        ({"status": "rejected"}, "#FDE2E1"),
-        ({"status": "applied"}, "#DBEAFE"),
-        ({"status": "interesting"}, "#DCFCE7"),
-        ({"favorite": True}, offer_card.FAVORITE_COLOR),
-        ({"online": False}, "#E5E7EB"),
-        ({"status": "not_for_me"}, "#FFEDD5"),
-        ({"status": "rejected", "favorite": True}, "#FDE2E1"),
-    ],
-)
-def test_whole_line_takes_the_color_of_its_marker(changes, color):
-    shown = [make_stored(1, **changes)]
-    frame = table_frame(shown)
-    styles = offer_table.row_styles(frame.iloc[0], offer_table.table_markers(shown), [False])
-    assert len(styles) == len(offer_table.COLUMNS)
-    assert all(f"background-color: {color}" in style for style in styles)
-
-
-def test_every_marker_has_its_color():
-    markers = {*browsing.STATUS_MARKERS.values(), browsing.MARKER_FAVORITE, browsing.MARKER_OFFLINE}
-    assert set(offer_table.ROW_STYLES) == markers
-
-
-def test_open_line_is_highlighted_above_its_color():
-    shown = [make_stored(1), make_stored(2, status="rejected")]
-    frame = table_frame(shown)
-    markers = offer_table.table_markers(shown)
-    width = len(offer_table.COLUMNS)
-    styles = offer_table.row_styles(frame.iloc[1], markers, [True, True], open_row=1)
-    assert styles == [offer_table.OPEN_ROW_STYLE] * width
-    assert (
-        offer_table.row_styles(frame.iloc[0], markers, [False, False], open_row=1) == [""] * width
-    )
-
-
-def test_source_column_shows_the_label(at):
-    assert set(table(at)["Source"]) == {"Business France"}
-
-
-def test_line_without_marker_keeps_the_default_color():
-    shown = [make_stored(1)]
-    frame = table_frame(shown)
-    styles = offer_table.row_styles(frame.iloc[0], offer_table.table_markers(shown), [False])
-    assert set(styles) == {""}
-
-
-def test_title_of_an_unread_offer_is_bold():
-    shown = [make_stored(1, favorite=True)]
-    frame = table_frame(shown)
-    styles = offer_table.row_styles(frame.iloc[0], offer_table.table_markers(shown), [True])
-    title = offer_table.COLUMNS.index(offer_table.TITLE)
-    assert offer_table.UNREAD_STYLE in styles[title]
-    # The color of the line is kept.
-    assert offer_card.FAVORITE_COLOR in styles[title]
-    others = styles[:title] + styles[title + 1 :]
-    assert not any(offer_table.UNREAD_STYLE in style for style in others)
-
-
-@pytest.mark.parametrize(
-    "cell, clicked, expected",
-    [
-        ((2, "Titre"), None, True),
-        ((2, "Titre"), (1, "Titre"), True),
-        ((2, "Titre"), (2, "Titre"), False),  # sent again with a checked box
-        (None, (2, "Titre"), False),
-    ],
-)
-def test_is_new_click(cell, clicked, expected):
-    assert offer_table.is_new_click(cell, clicked) == expected
-
-
-def test_clicked_cell_is_cleared_once_its_card_is_closed(at, ids):
+def test_list_shows_the_checked_and_open_offers(at, ids):
+    at.session_state[SELECTED] = {ids["VIE3"], ids["VIE1"]}
     at.session_state["offers_card"] = ids["VIE2"]
-    at.session_state["offers_clicked"] = (1, "Titre")
     at.run()
-    assert at.session_state["offers_clicked"] == (1, "Titre")
-
-    at.button(key="offers_card_close").click().run()
-    # Cleared, so that a new click on it opens the card again.
-    assert at.session_state["offers_clicked"] is None
-    assert at.session_state["offers_table"]["selection"]["cells"] == []
+    data = list_data(at)
+    assert data["checked"] == sorted([ids["VIE1"], ids["VIE3"]])
+    assert data["open"] == ids["VIE2"]
+    assert data["cardOpen"] and data["stars"]
 
 
-def test_read_selection():
-    rows = [30, 10, 20]
-    assert read_selection(rows, [0, 2], []) == ({30, 20}, None)
-    # A click on a cell opens the offer of its line.
-    assert read_selection(rows, [1], [(2, "Titre")]) == ({10}, 20)
-    assert read_selection(rows, [], []) == (set(), None)
+def test_list_without_card(at):
+    data = list_data(at)
+    assert data["open"] is None and not data["cardOpen"]
+    assert "card_pane" not in offer_list.split_style(PAGE.list_keys(), card_open=False)
 
 
-def test_checked_rows():
-    assert offer_table.checked_rows([30, 10, 20], {20, 30, 99}) == [0, 2]
+def test_list_row():
+    stored = make_stored(
+        1, status="rejected", letter_status="written", favorite=True, read_at=NOW, score=3
+    )
+    assert offer_list.list_row(stored) == {
+        "id": 1,
+        "title": "Data Analyst",
+        "subtitle": "ACME · PARIS, FRANCE",
+        "source": "test",
+        "score": "3",
+        "date": "20/10",
+        "letter": "Rédigée",
+        "marker": "rejected",
+        "unread": False,
+        "favorite": True,
+    }
+    unread = offer_list.list_row(make_stored(2, online=False))
+    assert (unread["score"], unread["letter"], unread["marker"]) == ("", "", "offline")
+    assert unread["unread"]
 
 
-def test_checked_boxes_follow_their_offers_when_the_lines_change(at, ids):
-    # Checked in the third line.
+def test_list_rows_markers():
+    shown = [make_stored(1, favorite=True), make_stored(2, status="applied", favorite=True)]
+    assert [row["marker"] for row in offer_list.list_rows(shown)] == ["favorite", "applied"]
+    # No yellow on the Favorites page; blue stays.
+    on_favorites = offer_list.list_rows(shown, on_favorites_page=True)
+    assert [row["marker"] for row in on_favorites] == ["", "applied"]
+
+
+def test_every_marker_has_its_class():
+    markers = {*browsing.STATUS_MARKERS.values(), browsing.MARKER_FAVORITE, browsing.MARKER_OFFLINE}
+    assert set(offer_list.MARKER_CLASSES) == markers | {browsing.NO_MARKER}
+    css = (offer_list.ASSETS / "offer_list.css").read_text()
+    for name in filter(None, offer_list.MARKER_CLASSES.values()):
+        assert f".{name} " in css
+
+
+def test_split_style_with_a_card():
+    css = offer_list.split_style(PAGE.list_keys(), card_open=True)
+    assert ".st-key-offers_split > :has(> .st-key-offers_list_pane)" in css
+    assert "var(--offer-list-width" in css
+    assert ".st-key-offers_card_pane {max-height" in css
+
+
+def test_source_shows_the_label(at):
+    assert {row["source"] for row in list_data(at)["rows"]} == {"Business France"}
+
+
+def more_filters_label(at):
+    return at.get("popover")[0].proto.popover.label
+
+
+def test_more_filters_shows_how_many_are_used(at):
+    assert more_filters_label(at) == offer_table.MORE_FILTERS
+    at.number_input(key="offers_min_score").set_value(1).run()
+    at.multiselect(key="offers_letters").select("").run()
+    assert more_filters_label(at) == f"{offer_table.MORE_FILTERS} (2)"
+
+
+def test_checked_box_hidden_by_a_filter_stays_checked(at, ids):
     at.session_state[SELECTED] = {ids["VIE3"]}
-    # VIE3 is now the first line.
-    at.text_input(key="offers_text").set_value("poste 3").run()
-    assert at.session_state["offers_table"]["selection"]["rows"] == [0]
+    at.text_input(key="offers_text").set_value("poste 2").run()
+    assert at.session_state[SELECTED] == {ids["VIE3"]}
+    at.text_input(key="offers_text").set_value("").run()
+    assert list_data(at)["checked"] == [ids["VIE3"]]
 
 
 def test_action_bar_updates_the_follow_up_of_the_card(at, db_path, ids):
@@ -446,8 +397,15 @@ def test_action_bar_updates_the_follow_up_of_the_card(at, db_path, ids):
     assert by_reference(db_path)["VIE2"].status == "not_for_me"
 
 
-def test_hint_without_card(at):
-    assert offer_table.NO_CARD_HINT in [c.value for c in at.caption]
+def test_card_fields_get_no_default_and_state_warning(at, ids, monkeypatch):
+    # Streamlit only logs this misuse; its logger does not reach caplog.
+    warnings = []
+    monkeypatch.setattr(policies._LOGGER, "warning", lambda *args, **kw: warnings.append(args))
+    at.session_state["offers_card"] = ids["VIE2"]
+    at.run()
+    at.menu_button(key="offers_status_menu").click("not_for_me").run()
+    at.run()
+    assert warnings == []
 
 
 def test_make_filter_without_choice_filters_nothing():
@@ -481,5 +439,43 @@ def test_make_filter_with_choices():
 
 
 def test_default_status_choices_match_the_default_filter(at):
-    statuses = at.multiselect(key="offers_statuses").value
+    statuses = at.pills(key="offers_statuses").value
     assert make_filter(PAGE, statuses=statuses) == browsing.OfferFilter()
+
+
+@pytest.mark.parametrize(
+    "targets, favorites, expected",
+    [
+        ([10, 20], {10, 20, 30}, offer_table.remove_favorite),
+        ([10, 20], {10}, offer_table.add_favorite),  # a mix: all become favorites
+        ([10], set(), offer_table.add_favorite),
+        ([], {10}, offer_table.add_favorite),
+    ],
+)
+def test_favorite_write(targets, favorites, expected):
+    assert offer_table.favorite_write(targets, favorites) is expected
+
+
+def test_one_star_for_the_checked_offers(at, db_path, ids):
+    star = "offers_group_favorite"
+    style = offer_card.favorite_style(star)
+    at.session_state[SELECTED] = {ids["VIE1"], ids["VIE2"]}
+    at.run()
+    assert not [b for b in at.button if b.help == "Retirer des favoris"]
+    at.button(key=star).click().run()
+    stored = by_reference(db_path)
+    assert stored["VIE1"].favorite and stored["VIE2"].favorite
+
+    # All favorites: the star is yellow and removes them.
+    at.session_state[SELECTED] = {ids["VIE1"], ids["VIE2"]}
+    at.run()
+    assert at.button(key=star).help == "Retirer des favoris"
+    assert style in [h.value for h in at.get("html")]
+    at.button(key=star).click().run()
+    assert not by_reference(db_path)["VIE1"].favorite
+
+
+def test_icon_style_covers_both_bars():
+    css = offer_table.icon_style(PAGE)
+    assert ".st-key-offers_actions" in css and ".st-key-offers_card_toolbar" in css
+    assert offer_table.ICON_SIZE in css

@@ -9,12 +9,12 @@ from offers.__main__ import DEFAULT_CONFIG, DEFAULT_DB, UI_APP
 from offers.storage.database import connect
 from offers.ui.session import parse_args
 
-# Favoris and Corbeille show their number of offers.
-PAGES = {
-    "app_pages/offers.py": "Offres",
-    "app_pages/favorites.py": "Favoris (0)",
-    "app_pages/trash.py": "Corbeille (0)",
-    "app_pages/collect.py": "Collecte",
+# The list pages have no title, to leave the room to the list: each one
+# is known by the prefix of its keys.
+LIST_PAGES = {
+    "app_pages/offers.py": "offers",
+    "app_pages/favorites.py": "favorites",
+    "app_pages/trash.py": "trash",
 }
 # The first run imports Streamlit and the project.
 TIMEOUT = 30
@@ -32,18 +32,25 @@ def start(monkeypatch, argv):
     return AppTest.from_file(str(UI_APP), default_timeout=TIMEOUT).run()
 
 
-@pytest.mark.parametrize("page, title", PAGES.items())
-def test_each_page_shows_its_title(monkeypatch, db_path, page, title):
+@pytest.mark.parametrize("page, prefix", LIST_PAGES.items())
+def test_each_list_page_shows_its_list(monkeypatch, db_path, page, prefix):
     at = start(monkeypatch, ["--db", str(db_path)])
     at.switch_page(page).run()
     assert not at.exception
-    assert at.title[0].value == title
+    assert at.text_input(key=f"{prefix}_text")
+
+
+def test_collect_page_shows_its_title(monkeypatch, db_path):
+    at = start(monkeypatch, ["--db", str(db_path)])
+    at.switch_page("app_pages/collect.py").run()
+    assert not at.exception
+    assert at.title[0].value == "Collecte"
 
 
 def test_first_page_is_offers(monkeypatch, db_path):
     at = start(monkeypatch, ["--db", str(db_path)])
     assert not at.exception
-    assert at.title[0].value == "Offres"
+    assert at.text_input(key="offers_text")
 
 
 def test_paths_come_from_the_command_line(monkeypatch, db_path, tmp_path):

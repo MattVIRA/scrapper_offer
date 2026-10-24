@@ -1,0 +1,123 @@
+/* One line per offer, as in a mailbox. Colors come from the Streamlit
+   theme, so that the list follows the light and dark themes. */
+.offer-list {
+  font-family: var(--st-font);
+  font-size: var(--st-base-font-size);
+  color: var(--st-text-color);
+  border: 1px solid var(--st-border-color-light);
+  border-radius: var(--st-base-radius);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.list-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  background: var(--st-secondary-background-color);
+  border-bottom: 1px solid var(--st-border-color-light);
+  color: var(--st-gray-text-color);
+  font-size: 0.85em;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.25rem;
+  padding: 0 0.75rem 0 0.5rem;
+  border-bottom: 1px solid var(--st-border-color-light);
+  border-left: 4px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.row:hover {
+  box-shadow: inset 0 -1px 0 var(--st-border-color), inset 0 1px 0 var(--st-border-color);
+  filter: brightness(0.97);
+}
+
+input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--st-primary-color);
+}
+
+.star {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 1.1em;
+  line-height: 1;
+  color: var(--st-gray-color);
+}
+
+.star.on {
+  color: #f59e0b;
+}
+
+.title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.company {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--st-gray-text-color);
+}
+
+.chip {
+  flex: none;
+  padding: 0 0.4rem;
+  border-radius: 0.6rem;
+  font-size: 0.8em;
+  background: var(--st-gray-background-color);
+  color: var(--st-gray-text-color);
+}
+
+.score {
+  flex: none;
+  min-width: 1.6rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--st-gray-text-color);
+}
+
+.date {
+  flex: none;
+  width: 3.4rem;
+  text-align: right;
+  font-size: 0.85em;
+  color: var(--st-gray-text-color);
+}
+
+.unread .title,
+.unread .date {
+  font-weight: 700;
+  color: var(--st-text-color);
+}
+
+/* Follow-up of the offer: a bar on the left and a light background. */
+.rejected { border-left-color: var(--st-red-color); background: var(--st-red-background-color); }
+.applied { border-left-color: var(--st-blue-color); background: var(--st-blue-background-color); }
+.not_for_me { border-left-color: var(--st-orange-color); background: var(--st-orange-background-color); }
+.interesting { border-left-color: var(--st-green-color); background: var(--st-green-background-color); }
+.favorite { border-left-color: var(--st-yellow-color); background: var(--st-yellow-background-color); }
+.offline { color: var(--st-gray-text-color); }
+.offline .title { text-decoration: line-through; }
+
+.row.open {
+  border-left-color: var(--st-primary-color);
+  background: color-mix(in srgb, var(--st-primary-color) 18%, var(--st-background-color));
+  box-shadow: inset 0 0 0 1px var(--st-primary-color);
+}

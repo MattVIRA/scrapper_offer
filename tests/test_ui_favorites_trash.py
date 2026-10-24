@@ -20,7 +20,15 @@ from offers.storage.database import (
 from offers.ui import offer_card
 from offers.ui.offer_table import PageSettings
 from tests.factories import make_stored
-from tests.test_ui_offers import TIMEOUT, button, by_reference, offer, table
+from tests.test_ui_offers import (
+    TIMEOUT,
+    button,
+    by_reference,
+    counters,
+    list_data,
+    offer,
+    titles,
+)
 
 NOW = datetime(2026, 10, 22, 9, 30)
 OFFERS = "app_pages/offers.py"
@@ -64,10 +72,6 @@ def open_page(monkeypatch, db_path):
     return open_page
 
 
-def titles(at):
-    return list(table(at)["Titre"]) if at.dataframe else []
-
-
 def write(db_path, action, offer_ids):
     conn = connect(db_path)
     action(conn, offer_ids, NOW)
@@ -81,16 +85,15 @@ def test_favorites_page(open_page):
     at = open_page(FAVORITES)
 
     assert not at.exception
-    assert at.title[0].value == "Favoris (2)"
     assert titles(at) == ["Poste 1", "Poste 2"]
+    assert "**2** offres" in counters(at)
 
 
-def test_favorites_has_the_columns_and_actions_of_offers(open_page):
+def test_favorites_has_the_actions_of_offers(open_page):
     favorites = open_page(FAVORITES)
     offers = open_page(OFFERS)
 
-    assert list(table(favorites).columns) == list(table(offers).columns)
-    assert [b.label for b in favorites.button] == [b.label for b in offers.button]
+    assert [b.help for b in favorites.button] == [b.help for b in offers.button]
     assert [m.label for m in favorites.menu_button] == ["Statut", "Lettre"]
 
 
@@ -99,7 +102,6 @@ def test_removing_a_favorite_takes_it_out_of_favorites(open_page, db_path, ids):
     button(at, "Retirer des favoris").click().run()
 
     assert titles(at) == ["Poste 2"]
-    assert at.title[0].value == "Favoris (1)"
     assert not by_reference(db_path)["VIE1"].favorite
 
 
@@ -112,7 +114,6 @@ def test_trashed_offer_leaves_offers_and_favorites(open_page, db_path, ids):
     assert titles(open_page(OFFERS)) == ["Poste 2"]
     assert titles(open_page(FAVORITES)) == ["Poste 2"]
     trash = open_page(TRASH)
-    assert trash.title[0].value == "Corbeille (2)"
     # In the trash, every status and offline offers are shown by default.
     assert titles(trash) == ["Poste 1", "Poste 3"]
 
@@ -121,7 +122,9 @@ def test_trash_only_offers_to_restore(open_page, db_path, ids):
     write(db_path, hide, [ids["VIE1"]])
     at = open_page(TRASH)
 
-    assert [b.label for b in at.button] == ["Restaurer"]
+    assert [b.help for b in at.button] == ["Restaurer"]
+    # No star to switch the favorites in the list.
+    assert not list_data(at)["stars"]
     assert not at.menu_button
 
 
@@ -146,7 +149,7 @@ def test_card_in_the_trash_is_read_only_and_restores(open_page, db_path, ids):
 
     assert not at.exception
     assert not at.text_area and not at.selectbox
-    # The follow-up shown under the list, without form.
+    # The follow-up shown in the card, without form.
     follow_up = next(table.value for table in at.table if "Notes" in table.value.index)
     assert follow_up.loc["Notes"].iloc[0] == "Relancer"
 
@@ -157,7 +160,7 @@ def test_card_in_the_trash_is_read_only_and_restores(open_page, db_path, ids):
 
 def test_empty_trash(open_page):
     at = open_page(TRASH)
-    assert at.title[0].value == "Corbeille (0)"
+    assert "**0** offres" in counters(at)
     assert "Aucune offre" in at.info[0].value
 
 
