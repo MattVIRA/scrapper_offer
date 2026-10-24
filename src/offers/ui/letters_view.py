@@ -5,7 +5,8 @@ from datetime import datetime
 import streamlit as st
 
 from offers.letters import LettersError
-from offers.letters.inputs import CONTACT_FILE, CV_DIR, EXAMPLES_DIR, INSTRUCTIONS_FILE
+from offers.letters.generate import has_letter
+from offers.letters.inputs import CV_DIR, EXAMPLES_DIR, INSTRUCTIONS_FILE
 from offers.letters.prompt import load_prompt, prompt_version, save_prompt
 from offers.summary import letter_line, letters_total
 from offers.tracking import status_label
@@ -39,7 +40,7 @@ def show_inputs(letters_config, inputs, error):
     st.subheader("Entrées")
     st.caption(
         f"Dossier du profil : {letters_config.profile_dir} ({CV_DIR}/, {EXAMPLES_DIR}/, "
-        f"{INSTRUCTIONS_FILE}, {CONTACT_FILE})"
+        f"{INSTRUCTIONS_FILE})"
     )
     if error:
         st.error(error, icon=":material/error:")
@@ -49,7 +50,6 @@ def show_inputs(letters_config, inputs, error):
             "CV": file_names(inputs.cvs),
             "Anciennes lettres": file_names(inputs.examples) or "aucune",
             "Consignes": INSTRUCTIONS_FILE if inputs.instructions else "aucune",
-            "Coordonnées": f"{inputs.contact.name}, {inputs.contact.city}",
         },
         border="horizontal",
         width="content",
@@ -123,7 +123,7 @@ def show_targets(targets):
             {
                 "Titre": stored.offer.title,
                 "Entreprise": stored.offer.company or "",
-                "Lettre": "déjà présente" if path.exists() else "",
+                "Lettre": "déjà présente" if has_letter(stored) else "",
             }
             for stored, path in targets
         ],
@@ -154,7 +154,8 @@ def confirm_generation(runner, db_path, letters_config, targets):
     st.markdown(f"**{len(targets)} lettres** vont être écrites :")
     st.text(
         "\n".join(
-            f"• {offer_name(stored.offer)}" + (" (lettre déjà présente)" if path.exists() else "")
+            f"• {offer_name(stored.offer)}"
+            + (" (lettre déjà présente)" if has_letter(stored) else "")
             for stored, path in targets
         )
     )
@@ -162,7 +163,7 @@ def confirm_generation(runner, db_path, letters_config, targets):
         "Chaque lettre utilise ton forfait Claude, environ une minute par lettre.",
         icon=":material/info:",
     )
-    if any(path.exists() for _, path in targets):
+    if any(has_letter(stored) for stored, _ in targets):
         st.checkbox(
             "Remplacer les lettres existantes",
             key=REPLACE_KEY,
@@ -170,14 +171,17 @@ def confirm_generation(runner, db_path, letters_config, targets):
             "Sans cette case, les offres qui en ont une sont sautées.",
         )
     with st.container(horizontal=True, horizontal_alignment="right"):
-        st.button("Annuler", key="letters_cancel", on_click=close_confirmation)
-        st.button(
+        cancelled = st.button("Annuler", key="letters_cancel", on_click=close_confirmation)
+        confirmed = st.button(
             "Confirmer",
             type="primary",
             key="letters_confirm",
             on_click=start_generation,
             args=(runner, db_path, letters_config, targets),
         )
+    # A click in a dialog only reruns the dialog: the whole page must rerun to close it.
+    if cancelled or confirmed:
+        st.rerun()
 
 
 def show_generate_button(runner, db_path, letters_config, targets):
@@ -202,10 +206,21 @@ def show_progress(job):
     """Progress of the running generation; the whole page reruns at the end."""
     if not job.running:
         st.rerun()
-    label = f"Génération en cours : {len(job.done)} lettres sur {len(job.offer_ids)}"
-    with st.status(label, expanded=True):
+    stopping = job.stop_requested.is_set()
+    if stopping:
+        label = "Arrêt demandé : la lettre en cours se termine, puis la génération s'arrête"
+    else:
+        label = f"Génération en cours : {len(job.done)} lettres sur {len(job.offer_ids)}"
+    with st.status(label, expanded=True, state="running"):
         for result in job.done:
             st.text(letter_line(result))
+    st.button(
+        "Arrêter la génération",
+        icon=":material/stop_circle:",
+        key="letters_stop",
+        disabled=stopping,
+        on_click=job.stop_requested.set,
+    )
 
 
 def show_result(job):

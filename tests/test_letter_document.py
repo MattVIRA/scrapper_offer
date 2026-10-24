@@ -1,32 +1,22 @@
 """Tests of the Word document of a letter (offers.letters.document)."""
 
 import os
-from datetime import date
 from pathlib import Path
 
 import docx
 import pytest
 
 from offers.letters import LettersError
-from offers.letters.document import french_date, letter_path, write_letter
-from offers.letters.inputs import Contact
+from offers.letters.document import follows_naming, letter_path, write_letter
 from tests.factories import make_offer
 
-TODAY = date(2026, 10, 23)
 LETTER = {
     "subject": "Candidature au poste de Data Analyst (VIE)",
     "salutation": "Madame, Monsieur,",
     "paragraphs": ["Premier paragraphe.", "  ", "Deuxième paragraphe."],
     "closing": "Je vous prie d'agréer mes salutations distinguées.",
+    "signature": "Camille Martin",
 }
-CONTACT = Contact(
-    name="Camille Martin",
-    email="camille@example.com",
-    city="Lyon",
-    address="1 rue de la Paix\n69001 Lyon",
-    phone="06 00 00 00 00",
-)
-OFFER = make_offer(company="ACME")
 
 
 def texts(path):
@@ -37,16 +27,10 @@ def texts(path):
 def test_written_letter_can_be_read_back(tmp_path):
     path = tmp_path / "lettres" / "a.docx"
 
-    write_letter(path, LETTER, CONTACT, OFFER, TODAY)
+    write_letter(path, LETTER)
 
+    # No contact details nor date: the old letters have none.
     assert texts(path) == [
-        "Camille Martin",
-        "1 rue de la Paix",
-        "69001 Lyon",
-        "06 00 00 00 00",
-        "camille@example.com",
-        "ACME",
-        "Lyon, le 23 octobre 2026",
         "Objet : Candidature au poste de Data Analyst (VIE)",
         "Madame, Monsieur,",
         "Premier paragraphe.",
@@ -57,47 +41,46 @@ def test_written_letter_can_be_read_back(tmp_path):
     assert sorted(p.name for p in path.parent.iterdir()) == ["a.docx"]
 
 
+def test_empty_subject_gives_no_subject_line(tmp_path):
+    path = tmp_path / "a.docx"
+    write_letter(path, {**LETTER, "subject": " "})
+    assert texts(path)[0] == "Madame, Monsieur,"
+
+
 def test_subject_already_starting_with_objet(tmp_path):
     path = tmp_path / "a.docx"
-    write_letter(path, {**LETTER, "subject": "Objet : Candidature"}, CONTACT, OFFER, TODAY)
+    write_letter(path, {**LETTER, "subject": "Objet : Candidature"})
     assert "Objet : Candidature" in texts(path)
 
     path = tmp_path / "b.docx"
-    write_letter(path, {**LETTER, "subject": "Objectif data"}, CONTACT, OFFER, TODAY)
+    write_letter(path, {**LETTER, "subject": "Objectif data"})
     assert "Objet : Objectif data" in texts(path)
-
-
-def test_minimal_contact_and_no_company(tmp_path):
-    path = tmp_path / "a.docx"
-    contact = Contact(name="A", email="a@example.com", city="Lyon")
-    write_letter(path, LETTER, contact, make_offer(company=None), TODAY)
-    assert texts(path)[:3] == ["A", "a@example.com", "Lyon, le 23 octobre 2026"]
-
-
-def test_french_date():
-    assert french_date(date(2026, 3, 1)) == "1er mars 2026"
-    assert french_date(date(2026, 8, 15)) == "15 août 2026"
 
 
 @pytest.mark.parametrize(
     "company, name",
     [
-        ("ACME", "test_7_ACME.docx"),
-        ("Société Générale / Paris", "test_7_Societe-Generale-Paris.docx"),
-        ("L'Oréal (H/F) ...", "test_7_L-Oreal-H-F.docx"),
-        (None, "test_7_entreprise.docx"),
-        ("???", "test_7_entreprise.docx"),
-        ("A" * 30 + " " + "B" * 30, "test_7_" + "A" * 30 + "-" + "B" * 9 + ".docx"),
+        ("ACME", "lettre_ACME.docx"),
+        # The name as written; only what a file name cannot hold is removed.
+        ("Société Générale", "lettre_Société Générale.docx"),
+        ("Société Générale / Paris", "lettre_Société Générale Paris.docx"),
+        ("L'Oréal (H/F)", "lettre_L'Oréal (H F).docx"),
+        (None, "lettre_entreprise.docx"),
+        ("???", "lettre_entreprise.docx"),
+        ("A" * 50 + " " + "B" * 50, "lettre_" + "A" * 50 + " " + "B" * 29 + ".docx"),
     ],
 )
-def test_letter_path(company, name):
-    offer = make_offer(source_id="7", company=company)
-    assert letter_path(Path("/l"), offer) == Path("/l") / name
+def test_letter_path(company, name, tmp_path):
+    assert letter_path(tmp_path, make_offer(company=company)) == tmp_path / name
 
 
-def test_source_id_is_made_safe():
-    offer = make_offer(source_id="a/b c", company="X")
-    assert letter_path("/l", offer).name == "test_a-b-c_X.docx"
+def test_letter_path_of_a_duplicate(tmp_path):
+    offer = make_offer(company="ACME")
+    (tmp_path / "lettre_ACME.docx").write_bytes(b"x")
+    taken = {tmp_path / "lettre_ACME_2.docx"}
+
+    # An existing file and a name given to another offer are both skipped.
+    assert letter_path(tmp_path, offer, taken) == tmp_path / "lettre_ACME_3.docx"
 
 
 def test_existing_letter_is_not_replaced(tmp_path):
@@ -105,7 +88,7 @@ def test_existing_letter_is_not_replaced(tmp_path):
     path.write_bytes(b"lettre de l'utilisateur")
 
     with pytest.raises(LettersError, match="existe déjà.*Remplacer les lettres existantes"):
-        write_letter(path, LETTER, CONTACT, OFFER, TODAY)
+        write_letter(path, LETTER)
 
     assert path.read_bytes() == b"lettre de l'utilisateur"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["a.docx"]
@@ -116,7 +99,7 @@ def test_replaced_letter_is_copied_first(tmp_path):
     path.write_bytes(b"ancienne")
     os.utime(path, (1761200000, 1761200000))
 
-    write_letter(path, LETTER, CONTACT, OFFER, TODAY, replace=True)
+    write_letter(path, LETTER, replace=True)
 
     assert "Premier paragraphe." in texts(path)
     (backup,) = (tmp_path / "backup").iterdir()
@@ -133,7 +116,7 @@ def test_nothing_is_left_when_writing_fails(tmp_path, monkeypatch):
 
     monkeypatch.setattr(docx.document.Document, "save", failing_save)
     with pytest.raises(LettersError, match="Impossible d'écrire la lettre.*disque plein"):
-        write_letter(path, LETTER, CONTACT, OFFER, TODAY)
+        write_letter(path, LETTER)
 
     assert list(tmp_path.iterdir()) == []
 
@@ -147,7 +130,16 @@ def test_failed_replacement_keeps_the_old_letter(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "replace", failing_replace)
     with pytest.raises(LettersError, match="fichier ouvert dans Word"):
-        write_letter(path, LETTER, CONTACT, OFFER, TODAY, replace=True)
+        write_letter(path, LETTER, replace=True)
 
     assert path.read_bytes() == b"ancienne"
     assert not (tmp_path / "a.docx.tmp").exists()
+
+
+def test_follows_naming(tmp_path):
+    offer = make_offer(company="ACME")
+    assert follows_naming(tmp_path / "lettre_ACME.docx", tmp_path, offer)
+    assert follows_naming(tmp_path / "lettre_ACME_3.docx", tmp_path, offer)
+    assert not follows_naming(tmp_path / "business_france_1_ACME.docx", tmp_path, offer)
+    assert not follows_naming(tmp_path / "lettre_Foo.docx", tmp_path, offer)
+    assert not follows_naming(tmp_path / "autre" / "lettre_ACME.docx", tmp_path, offer)

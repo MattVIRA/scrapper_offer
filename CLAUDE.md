@@ -70,12 +70,14 @@ et créent leur profil inventé dans `tmp_path` (`tests/letter_files.py`).
 
 **Lettres.** `config.yaml`, section `letters:` (chemins seulement,
 relatifs à `config.yaml`) : `profile_dir` (`profil/` : `cv/`,
-`exemples/`, `consignes.md`, `coordonnees.yaml`), `output_dir`
+`exemples/`, `consignes.md`), `output_dir`
 (`lettres/`), `prompt` (`prompts/lettre.md`, versionné, modifiable
 depuis la page Lettres ; sa version est l'empreinte du texte, gardée
 avec chaque lettre), `model` facultatif. Claude n'a aucun outil : il
-reçoit tout dans le prompt (sans les coordonnées) et renvoie la lettre
-en JSON, vérifiée ; le programme écrit le `.docx` et la base.
+reçoit tout dans le prompt et renvoie la lettre en JSON (objet,
+formule d'appel, paragraphes, politesse, signature), vérifiée ; le
+programme écrit le `.docx` et la base. Les anciennes lettres sont son
+modèle principal ; ni coordonnées ni date dans la lettre.
 
 **Tester l'interface.** `AppTest` (`streamlit.testing.v1`), sans
 navigateur, sur une base dans `tmp_path`, jamais la vraie (ne pas lancer

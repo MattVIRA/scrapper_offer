@@ -62,6 +62,8 @@ def letters_total(report):
         f"{len(report.written)} lettres écrites, {len(report.failed)} en erreur, "
         f"{len(report.skipped)} déjà présentes."
     )
+    if report.remaining:
+        line += f" Génération arrêtée : {report.remaining} offres restent « À rédiger »."
     if report.failed:
         line += " Les offres en erreur restent « À rédiger » : relance pour les refaire."
     return line

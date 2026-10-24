@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+import threading
 from datetime import datetime
 
 import pytest
@@ -29,7 +30,13 @@ WAIT = 10
 def fake_claude(prompt, schema, model=None):
     if "Titre : Data 2\n" in prompt:
         raise ClaudeError("Limite d'usage du forfait Claude atteinte.")
-    return {"subject": "S", "salutation": "Madame,", "paragraphs": ["P"], "closing": "C"}
+    return {
+        "subject": "S",
+        "salutation": "Madame,",
+        "paragraphs": ["P"],
+        "closing": "C",
+        "signature": "N",
+    }
 
 
 @pytest.fixture
@@ -82,6 +89,8 @@ def generate(at):
     """Click « Générer les lettres », then « Confirmer », wait for the end, show the page."""
     button(at, "Générer les lettres").click().run()
     button(at, "Confirmer").click().run()
+    # The dialog is closed.
+    assert not [b for b in at.button if b.label == "Confirmer"]
     job = letters_job.get_letters_runner().job
     assert job.finished.wait(WAIT)
     return at.run()
@@ -96,12 +105,11 @@ def test_inputs_and_targets_are_listed(open_page, tmp_path):
 
     assert not at.exception
     inputs = at.table[0].value
-    assert list(inputs.index) == ["CV", "Anciennes lettres", "Consignes", "Coordonnées"]
+    assert list(inputs.index) == ["CV", "Anciennes lettres", "Consignes"]
     assert list(inputs.iloc[:, 0]) == [
         "cv.pdf",
         "lettre_acme.docx",
         "consignes.md",
-        "Camille Martin, Paris",
     ]
     assert "photo.png" in texts(at.warning)[0]
     targets = at.dataframe[0].value
@@ -175,7 +183,7 @@ def test_confirmed_generation_writes_the_letters_and_shows_the_summary(open_page
     at = generate(open_page())
 
     assert not at.exception
-    assert texts(at.success) == ["Data 1 (Société 1) : lettre écrite (fake_1_Societe-1.docx)."]
+    assert texts(at.success) == ["Data 1 (Société 1) : lettre écrite (lettre_Société 1.docx)."]
     assert texts(at.error) == [
         "Data 2 (Société 2) : en erreur, pas de lettre. Limite d'usage du forfait Claude atteinte."
     ]
@@ -188,7 +196,12 @@ def test_confirmed_generation_writes_the_letters_and_shows_the_summary(open_page
 
 def test_existing_letter_can_be_replaced(open_page, paths, tmp_path):
     (tmp_path / "lettres").mkdir()
-    (tmp_path / "lettres" / "fake_1_Societe-1.docx").write_bytes(b"ancienne")
+    old = tmp_path / "lettres" / "lettre_Société 1.docx"
+    old.write_bytes(b"ancienne")
+    conn = connect(paths["db"])
+    record_letter(conn, 1, old, "v1", NOW)
+    set_letter_status(conn, [1], "to_write", NOW)
+    conn.close()
     at = open_page()
     assert list(at.dataframe[0].value["Lettre"]) == ["déjà présente", ""]
 
@@ -198,8 +211,37 @@ def test_existing_letter_can_be_replaced(open_page, paths, tmp_path):
     assert letters_job.get_letters_runner().job.finished.wait(WAIT)
     at.run()
 
-    assert texts(at.success) == ["Data 1 (Société 1) : lettre écrite (fake_1_Societe-1.docx)."]
+    assert texts(at.success) == ["Data 1 (Société 1) : lettre écrite (lettre_Société 1.docx)."]
     assert list((tmp_path / "lettres" / "backup").iterdir())
+
+
+def test_stop_button(open_page, paths, monkeypatch):
+    release = threading.Event()
+    first_call = threading.Event()
+
+    def slow_claude(prompt, schema, model=None):
+        first_call.set()
+        assert release.wait(WAIT)
+        return fake_claude(prompt, schema, model)
+
+    monkeypatch.setattr(claude_code, "ask_json", slow_claude)
+    at = open_page()
+    button(at, "Générer les lettres").click().run()
+    button(at, "Confirmer").click().run()
+    assert first_call.wait(WAIT)
+
+    at.run()
+    assert at.status[0].label == "Génération en cours : 0 lettres sur 2"
+    button(at, "Arrêter la génération").click().run()
+    assert at.status[0].label.startswith("Arrêt demandé")
+    assert button(at, "Arrêter la génération").disabled
+
+    release.set()
+    assert letters_job.get_letters_runner().job.finished.wait(WAIT)
+    at.run()
+    assert texts(at.success) == ["Data 1 (Société 1) : lettre écrite (lettre_Société 1.docx)."]
+    assert any("Génération arrêtée : 1 offres restent" in m.value for m in at.markdown)
+    assert letter_count(paths["db"]) == 1
 
 
 # --- Letters written (T5.8) ---------------------------------------------------

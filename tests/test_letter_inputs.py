@@ -4,7 +4,7 @@ import pytest
 
 from offers.config import LettersConfig
 from offers.letters import LettersError
-from offers.letters.inputs import Contact, load_inputs, read_text
+from offers.letters.inputs import load_inputs, read_text
 from tests.letter_files import make_profile, write_docx, write_pdf
 
 
@@ -26,25 +26,17 @@ def test_complete_profile(tmp_path):
         ("lettre_acme.docx", "Madame, Monsieur,\nAncien style.")
     ]
     assert inputs.instructions == "Ton direct, une page."
-    assert inputs.contact == Contact(
-        name="Camille Martin",
-        email="camille@example.com",
-        city="Paris",
-        address="1 rue de la Paix, 75002 Paris",
-        phone="06 00 00 00 00",
-    )
     assert inputs.ignored == []
 
 
 def test_optional_parts_may_be_missing(tmp_path):
-    profile = make_profile(tmp_path, contact="name: A\nemail: a@example.com\ncity: Lyon\n")
+    profile = make_profile(tmp_path)
     (profile / "consignes.md").unlink()
     (profile / "exemples" / "lettre_acme.docx").unlink()
 
     inputs = inputs_of(profile)
 
     assert inputs.examples == [] and inputs.instructions == ""
-    assert inputs.contact == Contact(name="A", email="a@example.com", city="Lyon")
 
 
 def test_other_formats_are_ignored_and_listed(tmp_path):
@@ -80,28 +72,6 @@ def test_no_cv(tmp_path, files):
         (profile / "cv" / name).write_bytes(b"x")
 
     with pytest.raises(LettersError, match="Aucun CV lisible.*Ajoute ton CV"):
-        inputs_of(profile)
-
-
-def test_missing_contact(tmp_path):
-    profile = make_profile(tmp_path, contact=None)
-    with pytest.raises(LettersError, match="Coordonnées introuvables : crée .*coordonnees.yaml"):
-        inputs_of(profile)
-
-
-@pytest.mark.parametrize(
-    "contact, message",
-    [
-        ("- name\n", "doit contenir name"),
-        ("name: A\nemail: a@example.com\n", "« city » est absent ou vide"),
-        ("name: A\nemail: a@example.com\ncity: ''\n", "« city » est absent ou vide"),
-        ("name: A\nemail: a@b.c\ncity: Lyon\nphone: 0600000000\n", "« phone » doit être du texte"),
-        ("name: [\n", "Impossible de lire"),
-    ],
-)
-def test_badly_filled_contact(tmp_path, contact, message):
-    profile = make_profile(tmp_path, contact=contact)
-    with pytest.raises(LettersError, match=message):
         inputs_of(profile)
 
 

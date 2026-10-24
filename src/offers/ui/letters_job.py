@@ -50,6 +50,7 @@ def generate(db_path, letters_config, replace, job):
             # Looked up at each run, so that the tests can replace Claude.
             ask=claude_code.ask_json,
             on_letter_done=job.done.append,
+            should_stop=job.stop_requested.is_set,
         )
 
 

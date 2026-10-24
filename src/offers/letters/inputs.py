@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import docx
-import yaml
 from docx.opc.exceptions import PackageNotFoundError
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
@@ -16,10 +15,6 @@ from offers.letters import LettersError
 CV_DIR = "cv"
 EXAMPLES_DIR = "exemples"
 INSTRUCTIONS_FILE = "consignes.md"
-CONTACT_FILE = "coordonnees.yaml"
-# Keys of coordonnees.yaml; the required ones go in the header and signature.
-CONTACT_REQUIRED = ("name", "email", "city")
-CONTACT_OPTIONAL = ("address", "phone")
 TEXT_SUFFIXES = {".md", ".txt"}
 # System files and Word lock files, never shown as ignored.
 HIDDEN_PREFIXES = (".", "~$")
@@ -34,17 +29,6 @@ class Document:
 
 
 @dataclass(frozen=True)
-class Contact:
-    """Contact details, for the header and the signature of the letter."""
-
-    name: str
-    email: str
-    city: str
-    address: str = ""
-    phone: str = ""
-
-
-@dataclass(frozen=True)
 class LetterInputs:
     """Everything a letter is written from, read from the profile folder."""
 
@@ -53,7 +37,6 @@ class LetterInputs:
     examples: list[Document]
     # Empty when consignes.md does not exist.
     instructions: str
-    contact: Contact
     # Files of cv/ and exemples/ in a format that cannot be read.
     ignored: list[Path]
 
@@ -63,8 +46,8 @@ def load_inputs(letters_config):
     profile_dir = Path(letters_config.profile_dir)
     if not profile_dir.is_dir():
         raise LettersError(
-            f"Dossier du profil introuvable : {profile_dir}. Crée-le avec dedans {CV_DIR}/, "
-            f"{EXAMPLES_DIR}/ et {CONTACT_FILE} (voir « letters » dans config.yaml)."
+            f"Dossier du profil introuvable : {profile_dir}. Crée-le avec dedans {CV_DIR}/ "
+            f"et {EXAMPLES_DIR}/ (voir « letters » dans config.yaml)."
         )
     cvs, ignored_cvs = read_folder(profile_dir / CV_DIR)
     if not cvs:
@@ -79,7 +62,6 @@ def load_inputs(letters_config):
         cvs=cvs,
         examples=examples,
         instructions=instructions.strip(),
-        contact=load_contact(profile_dir / CONTACT_FILE),
         ignored=ignored_cvs + ignored_examples,
     )
 
@@ -144,28 +126,3 @@ def read_plain_text(path):
 READERS = {".pdf": read_pdf, ".docx": read_docx} | {
     suffix: read_plain_text for suffix in TEXT_SUFFIXES
 }
-
-
-def load_contact(path):
-    """Return the contact details of coordonnees.yaml."""
-    example = ", ".join(f"{key}: ..." for key in CONTACT_REQUIRED + CONTACT_OPTIONAL)
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as err:
-        raise LettersError(f"Coordonnées introuvables : crée {path} avec {example}.") from err
-    except (OSError, UnicodeDecodeError, yaml.YAMLError) as err:
-        raise LettersError(f"Impossible de lire {path} : {err}.") from err
-    if not isinstance(data, dict):
-        raise LettersError(f"{path} doit contenir {example}.")
-    values = {}
-    for key in CONTACT_REQUIRED + CONTACT_OPTIONAL:
-        value = data.get(key) or ""
-        if not isinstance(value, str):
-            raise LettersError(
-                f"{path} : « {key} » doit être du texte "
-                "(entre guillemets s'il n'a que des chiffres)."
-            )
-        if key in CONTACT_REQUIRED and not value.strip():
-            raise LettersError(f"{path} : « {key} » est absent ou vide ({example}).")
-        values[key] = value.strip()
-    return Contact(**values)

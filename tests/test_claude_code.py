@@ -14,6 +14,7 @@ LETTER = {
     "salutation": "Madame, Monsieur,",
     "paragraphs": ["Un.", "Deux."],
     "closing": "Bien à vous.",
+    "signature": "Camille Martin",
 }
 
 

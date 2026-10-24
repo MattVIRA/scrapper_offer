@@ -233,7 +233,13 @@ def letters_setup(tmp_path, paths, monkeypatch):
 
 
 def fake_claude(prompt, schema, model=None):
-    return {"subject": "S", "salutation": "Madame,", "paragraphs": ["P"], "closing": "C"}
+    return {
+        "subject": "S",
+        "salutation": "Madame,",
+        "paragraphs": ["P"],
+        "closing": "C",
+        "signature": "N",
+    }
 
 
 @pytest.fixture
@@ -270,8 +276,8 @@ def test_letters_confirmed(monkeypatch, capsys, letters_setup, tmp_path, with_fa
     assert "forfait Claude" in questions[0]
     output = capsys.readouterr().out.splitlines()
     assert output[-3:] == [
-        "Data 1 (ACME) : lettre écrite (fake_1_ACME.docx).",
-        "Data 2 (Foo) : lettre écrite (fake_2_Foo.docx).",
+        "Data 1 (ACME) : lettre écrite (lettre_ACME.docx).",
+        "Data 2 (Foo) : lettre écrite (lettre_Foo.docx).",
         "2 lettres écrites, 0 en erreur, 0 déjà présentes.",
     ]
     assert letters_in_db(tmp_path) == 2
@@ -283,21 +289,37 @@ def test_letters_confirmed(monkeypatch, capsys, letters_setup, tmp_path, with_fa
 
 
 def test_letters_yes_and_replace(capsys, letters_setup, tmp_path, with_fake_claude):
-    (tmp_path / "lettres").mkdir()
-    (tmp_path / "lettres" / "fake_1_ACME.docx").write_bytes(b"ancienne")
     options = [*letters_setup[:2], *letters_setup[4:]]
+    assert cli.main(["letters", "--yes", *options]) == 0
+    conn = connect(tmp_path / "data" / "offers.db")
+    set_letter_status(conn, [1], "to_write", datetime(2026, 10, 24, 9, 0))
+    conn.close()
+    capsys.readouterr()
 
     assert cli.main(["letters", "--yes", *options]) == 0
     output = capsys.readouterr().out
     assert "Data 1 — ACME (lettre déjà présente)" in output
-    assert "1 lettres écrites, 0 en erreur, 1 déjà présentes." in output
+    assert "0 lettres écrites, 0 en erreur, 1 déjà présentes." in output
 
     assert cli.main(["letters", "--yes", "--replace", *options]) == 0
-    assert "1 lettres écrites" in capsys.readouterr().out
+    assert "Data 1 (ACME) : lettre écrite (lettre_ACME.docx)." in capsys.readouterr().out
     assert letters_in_db(tmp_path) == 2
+    assert len(list((tmp_path / "lettres" / "backup").iterdir())) == 1
+
+
+def test_letters_never_overwrite_a_file_of_the_user(
+    capsys, letters_setup, tmp_path, with_fake_claude
+):
+    (tmp_path / "lettres").mkdir()
+    (tmp_path / "lettres" / "lettre_ACME.docx").write_bytes(b"lettre de l'utilisateur")
+
+    assert cli.main(["letters", "--yes", *letters_setup[:2], *letters_setup[4:]]) == 0
+
+    assert "Data 1 (ACME) : lettre écrite (lettre_ACME_2.docx)." in capsys.readouterr().out
+    assert (tmp_path / "lettres" / "lettre_ACME.docx").read_bytes() == b"lettre de l'utilisateur"
 
 
 def test_letters_missing_input(capsys, letters_setup, tmp_path, with_fake_claude):
-    (tmp_path / "profil" / "coordonnees.yaml").unlink()
+    (tmp_path / "profil" / "cv" / "cv.pdf").unlink()
     assert cli.main(["letters", "--yes", *letters_setup[:2], *letters_setup[4:]]) == 1
-    assert "Erreur : Coordonnées introuvables" in capsys.readouterr().out
+    assert "Erreur : Aucun CV lisible" in capsys.readouterr().out

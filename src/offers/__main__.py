@@ -8,7 +8,7 @@ from pathlib import Path
 
 from offers.config import load_config
 from offers.errors import OffersError
-from offers.letters.generate import letters_to_write, run_letters
+from offers.letters.generate import has_letter, letters_to_write, run_letters
 from offers.pipeline import export_workbook, run_collect
 from offers.sources import SOURCES, source_label
 from offers.storage.database import backup_database, connect, probable_duplicates
@@ -141,7 +141,7 @@ def letters(args):
         return
     print(f"{len(targets)} offres « À rédiger » :")
     for stored, path in targets:
-        present = " (lettre déjà présente)" if path.exists() else ""
+        present = " (lettre déjà présente)" if has_letter(stored) else ""
         print(f"  {stored.offer.title} — {stored.offer.company or '?'}{present}")
     question = "Écrire ces lettres ? Chaque lettre utilise ton forfait Claude. [o/N] "
     if not args.yes and input(question).strip().lower() not in YES_ANSWERS:

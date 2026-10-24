@@ -19,8 +19,9 @@ LETTER_SCHEMA = {
         "salutation": {"type": "string"},
         "paragraphs": {"type": "array", "items": {"type": "string"}},
         "closing": {"type": "string"},
+        "signature": {"type": "string"},
     },
-    "required": ["subject", "salutation", "paragraphs", "closing"],
+    "required": ["subject", "salutation", "paragraphs", "closing", "signature"],
 }
 ANSWER_FORMAT = (
     "Réponds uniquement par un objet JSON qui suit ce schéma, sans texte autour :\n"
@@ -50,14 +51,13 @@ def build_prompt(template, inputs, offer):
     """Return the text sent to Claude for the letter of an offer.
 
     template: text of the prompt file; inputs: LetterInputs; offer: Offer.
-    Each part is in its own tag, so that Claude tells them apart. The
-    contact details are not sent: the program adds them to the letter.
+    Each part is in its own tag, so that Claude tells them apart.
     """
     parts = [template.strip()]
     if inputs.instructions:
         parts.append(tagged("consignes", inputs.instructions))
-    parts += [tagged("cv", cv.text, fichier=cv.name) for cv in inputs.cvs]
     parts += [tagged("ancienne_lettre", e.text, fichier=e.name) for e in inputs.examples]
+    parts += [tagged("cv", cv.text, fichier=cv.name) for cv in inputs.cvs]
     parts.append(tagged("offre", offer_text(offer)))
     parts.append(ANSWER_FORMAT)
     return "\n\n".join(parts) + "\n"

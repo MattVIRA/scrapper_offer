@@ -10,7 +10,13 @@ from offers.config import LettersConfig
 from offers.letters import LettersError
 from offers.letters.generate import run_letters
 from offers.letters.prompt import prompt_version
-from offers.storage.database import StorageError, connect, hide, set_letter_status
+from offers.storage.database import (
+    StorageError,
+    connect,
+    hide,
+    record_letter,
+    set_letter_status,
+)
 from offers.summary import letters_summary
 from tests.letter_files import make_profile
 from tests.test_storage_offers import offer, save, stored
@@ -25,6 +31,7 @@ def answer(text="Corps de la lettre."):
         "salutation": "Madame, Monsieur,",
         "paragraphs": [text],
         "closing": "Bien à vous.",
+        "signature": "Camille Martin",
     }
 
 
@@ -89,19 +96,19 @@ def test_one_offer_in_error_does_not_stop_the_others(conn, letters_config):
         "written",
     ]
     letter = offers["fake-1"].letter
-    assert letter.path == letters_config.output_dir / "fake_1_Societe-1.docx"
+    assert letter.path == letters_config.output_dir / "lettre_Société 1.docx"
     assert "Corps de la lettre." in paragraphs(letter.path)
     assert letter.prompt_version == prompt_version("Écris une lettre.")
     assert sorted(p.name for p in letters_config.output_dir.iterdir()) == [
-        "fake_1_Societe-1.docx",
-        "fake_3_Societe-3.docx",
+        "lettre_Société 1.docx",
+        "lettre_Société 3.docx",
     ]
     # Model of the settings, prompt of the file.
     assert {model for _, model in ask.prompts} == {"sonnet"}
     assert all(prompt.startswith("Écris une lettre.") for prompt, _ in ask.prompts)
 
     lines = letters_summary(report)
-    assert lines[0] == "Data 1 (Société 1) : lettre écrite (fake_1_Societe-1.docx)."
+    assert lines[0] == "Data 1 (Société 1) : lettre écrite (lettre_Société 1.docx)."
     assert lines[1].startswith("Data 2 (Société 2) : en erreur, pas de lettre. Limite")
     assert lines[-1] == (
         "2 lettres écrites, 1 en erreur, 0 déjà présentes. "
@@ -138,7 +145,7 @@ def test_existing_file_is_skipped_without_replace(conn, letters_config):
     assert "Corps de la lettre." in paragraphs(skipped.path)
     assert stored(conn)["fake-1"].letter_status == "to_write"
     assert letters_summary(report) == [
-        "Data 1 (Société 1) : lettre déjà présente (fake_1_Societe-1.docx), non remplacée.",
+        "Data 1 (Société 1) : lettre déjà présente (lettre_Société 1.docx), non remplacée.",
         "0 lettres écrites, 0 en erreur, 1 déjà présentes.",
     ]
 
@@ -178,3 +185,46 @@ def test_file_is_removed_if_the_database_refuses_it(conn, letters_config, monkey
     assert failed.error == "base verrouillée"
     assert list(letters_config.output_dir.iterdir()) == []
     assert stored(conn)["fake-1"].letter_status == "to_write"
+
+
+def test_stop_before_the_next_offer(conn, letters_config):
+    ask = FakeClaude()
+
+    # Stop asked while the first letter is written.
+    report = generate(conn, letters_config, ask, should_stop=lambda: len(ask.prompts) >= 1)
+
+    assert [r.stored.offer.reference for r in report.written] == ["fake-1"]
+    assert report.remaining == 2
+    assert [s.letter_status for s in stored(conn).values()] == ["written", "to_write", "to_write"]
+    assert letters_summary(report)[-1] == (
+        "1 lettres écrites, 0 en erreur, 0 déjà présentes. "
+        "Génération arrêtée : 2 offres restent « À rédiger »."
+    )
+
+
+def test_two_offers_of_the_same_company(tmp_path, letters_config):
+    conn = connect(tmp_path / "same.db")
+    save(conn, [offer(1, company="ACME"), offer(2, company="ACME")])
+    set_letter_status(conn, [1, 2], "to_write", NOW)
+
+    report = generate(conn, letters_config, FakeClaude(), ids=[1, 2])
+
+    assert [r.path.name for r in report.written] == ["lettre_ACME.docx", "lettre_ACME_2.docx"]
+
+
+def test_old_name_is_changed_when_the_letter_is_redone(conn, letters_config):
+    old = letters_config.output_dir / "fake_1_Societe-1.docx"
+    old.parent.mkdir()
+    old.write_bytes(b"ancienne")
+    record_letter(conn, 1, old, "v0", NOW)
+    set_letter_status(conn, [1], "to_write", NOW)
+
+    report = generate(conn, letters_config, FakeClaude(), ids=[1], replace=True)
+
+    (written,) = report.written
+    assert written.path.name == "lettre_Société 1.docx"
+    assert stored(conn)["fake-1"].letter.path == written.path
+    # The old file is moved aside, never deleted.
+    assert not old.exists()
+    (backup,) = (letters_config.output_dir / "backup").iterdir()
+    assert backup.name.startswith("fake_1_Societe-1_") and backup.read_bytes() == b"ancienne"

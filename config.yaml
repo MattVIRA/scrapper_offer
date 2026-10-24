@@ -31,11 +31,11 @@ keywords_exclude: []
 
 # Lettres de motivation (page Lettres de l'interface).
 # Chemins relatifs au dossier de ce fichier. Aucune donnée personnelle
-# ici : CV et coordonnées vont dans le dossier du profil, hors git.
+# ici : le CV va dans le dossier du profil, hors git.
 letters:
-  # Contient cv/ (un ou plusieurs CV), exemples/ (anciennes lettres),
-  # consignes.md (facultatif : ton, longueur, points à mettre en avant)
-  # et coordonnees.yaml (nom, adresse, téléphone, email, ville).
+  # Contient cv/ (un ou plusieurs CV), exemples/ (anciennes lettres,
+  # modèles de la lettre) et consignes.md (facultatif : ton, longueur,
+  # points à mettre en avant).
   profile_dir: profil
   # Dossier où les lettres .docx sont écrites.
   output_dir: lettres

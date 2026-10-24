@@ -26,6 +26,8 @@ class BackgroundJob:
     # Unexpected error, raised again by the page so that its trace is seen.
     failure: BaseException | None = None
     finished: threading.Event = field(default_factory=threading.Event)
+    # Set by the page; the work checks it between two steps.
+    stop_requested: threading.Event = field(default_factory=threading.Event)
 
     @property
     def running(self):

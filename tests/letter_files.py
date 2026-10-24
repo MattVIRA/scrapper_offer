@@ -2,14 +2,6 @@
 
 import docx
 
-CONTACT = """\
-name: "Camille Martin"
-address: "1 rue de la Paix, 75002 Paris"
-phone: "06 00 00 00 00"
-email: "camille@example.com"
-city: "Paris"
-"""
-
 
 def write_pdf(path, text):
     """Write a one-page PDF showing text (ASCII only), with a valid xref table."""
@@ -45,7 +37,7 @@ def write_docx(path, paragraphs):
     document.save(str(path))
 
 
-def make_profile(root, contact=CONTACT):
+def make_profile(root):
     """Create a complete profile folder in root and return its path."""
     profile = root / "profil"
     (profile / "cv").mkdir(parents=True)
@@ -53,6 +45,4 @@ def make_profile(root, contact=CONTACT):
     write_pdf(profile / "cv" / "cv.pdf", "Camille Martin - Data Scientist - Python")
     write_docx(profile / "exemples" / "lettre_acme.docx", ["Madame, Monsieur,", "Ancien style."])
     (profile / "consignes.md").write_text("Ton direct, une page.\n", encoding="utf-8")
-    if contact is not None:
-        (profile / "coordonnees.yaml").write_text(contact, encoding="utf-8")
     return profile

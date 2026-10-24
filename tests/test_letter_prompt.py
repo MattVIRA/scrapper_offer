@@ -6,7 +6,7 @@ from datetime import datetime
 import pytest
 
 from offers.letters import LettersError
-from offers.letters.inputs import Contact, Document, LetterInputs
+from offers.letters.inputs import Document, LetterInputs
 from offers.letters.prompt import (
     LETTER_SCHEMA,
     build_prompt,
@@ -22,7 +22,6 @@ INPUTS = LetterInputs(
     cvs=[Document("cv.pdf", "Data scientist, Python, 3 ans chez Foo.")],
     examples=[Document("acme.docx", "Ancienne lettre pour ACME."), Document("b.md", "Autre.")],
     instructions="Ton direct.",
-    contact=Contact(name="Camille Martin", email="camille@example.com", city="Lyon"),
     ignored=[],
 )
 
@@ -62,12 +61,12 @@ def test_built_prompt_has_every_input_and_the_offer():
     ):
         assert expected in offer_part
     assert '"paragraphs"' in text[text.index("</offre>") :]
-    # The contact details are added by the program, never sent.
-    assert "camille@example.com" not in text
+    # The old letters, the main model, come before the CV.
+    assert text.index("<ancienne_lettre") < text.index("<cv")
 
 
 def test_missing_parts_of_the_offer_and_no_instructions():
-    inputs = LetterInputs(INPUTS.cvs, [], "", INPUTS.contact, [])
+    inputs = LetterInputs(INPUTS.cvs, [], "", [])
     offer = make_offer(company=None, city=None, country=None, duration_months=None)
 
     text = build_prompt("Prompt", inputs, offer)
@@ -79,7 +78,7 @@ def test_missing_parts_of_the_offer_and_no_instructions():
 
 
 def test_file_names_cannot_break_the_tags():
-    inputs = LetterInputs([Document('a"b.txt', "CV")], [], "", INPUTS.contact, [])
+    inputs = LetterInputs([Document('a"b.txt', "CV")], [], "", [])
     assert '<cv fichier="a&quot;b.txt">' in build_prompt("P", inputs, make_offer())
 
 

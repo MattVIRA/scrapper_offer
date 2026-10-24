@@ -53,7 +53,7 @@ class SourceConfig:
 class LettersConfig:
     """Where to find what a cover letter needs, and where to write it."""
 
-    # cv/, exemples/, consignes.md and coordonnees.yaml (offers.letters.inputs).
+    # cv/, exemples/ and consignes.md (offers.letters.inputs).
     profile_dir: Path = Path("profil")
     output_dir: Path = Path("lettres")
     prompt: Path = Path("prompts/lettre.md")
