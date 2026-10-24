@@ -1,8 +1,6 @@
 """Read and check config.yaml, and switch its searches on or off."""
 
 import io
-import os
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -10,12 +8,15 @@ import yaml
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError as RoundTripError
 
-from offers.backups import remove_old_backups
+from offers.backups import copy_to_backup, write_text_atomically
 from offers.errors import OffersError
 
 # Keys of a source section that are not source-specific options.
 COMMON_SOURCE_KEYS = {"enabled", "searches"}
 BACKUP_PREFIX = "config_"
+# Paths of the « letters » section, relative to the folder of config.yaml.
+LETTERS_PATHS = ("profile_dir", "output_dir", "prompt")
+LETTERS_KEYS = (*LETTERS_PATHS, "model")
 # Long URLs stay on one line when the file is written again.
 LINE_WIDTH = 4096
 
@@ -49,12 +50,25 @@ class SourceConfig:
 
 
 @dataclass(frozen=True)
+class LettersConfig:
+    """Where to find what a cover letter needs, and where to write it."""
+
+    # cv/, exemples/, consignes.md and coordonnees.yaml (offers.letters.inputs).
+    profile_dir: Path = Path("profil")
+    output_dir: Path = Path("lettres")
+    prompt: Path = Path("prompts/lettre.md")
+    # Model given to claude -p; None: the default model of Claude Code.
+    model: str | None = None
+
+
+@dataclass(frozen=True)
 class Config:
     """Whole configuration."""
 
     sources: list[SourceConfig]
     keywords_include: list[str]
     keywords_exclude: list[str]
+    letters: LettersConfig = field(default_factory=LettersConfig)
 
     def enabled_sources(self):
         """Return the sources to collect."""
@@ -81,6 +95,7 @@ def load_config(path, known_sources):
         sources=sources,
         keywords_include=parse_keywords(data, "keywords_include"),
         keywords_exclude=parse_keywords(data, "keywords_exclude"),
+        letters=parse_letters(data.get("letters"), Path(path).parent),
     )
 
 
@@ -149,6 +164,35 @@ def parse_keywords(data, key):
     return keywords
 
 
+def parse_letters(section, root):
+    """Return the letters settings; missing keys take their default value.
+
+    root: folder the relative paths start from (the one of config.yaml).
+    """
+    section = section if section is not None else {}
+    if not isinstance(section, dict):
+        raise ConfigError("La rubrique « letters » doit contenir des réglages (clé: valeur).")
+    unknown = sorted(set(section) - set(LETTERS_KEYS))
+    if unknown:
+        raise ConfigError(
+            f"letters : réglage inconnu « {unknown[0]} ». "
+            f"Réglages possibles : {', '.join(LETTERS_KEYS)}."
+        )
+    defaults = LettersConfig()
+    paths = {}
+    for key in LETTERS_PATHS:
+        value = section.get(key, getattr(defaults, key))
+        if not isinstance(value, (str, Path)) or not str(value).strip():
+            raise ConfigError(
+                f"letters.{key} doit être un chemin, par exemple {getattr(defaults, key)}."
+            )
+        paths[key] = root / value
+    model = section.get("model")
+    if model is not None and (not isinstance(model, str) or not model.strip()):
+        raise ConfigError("letters.model doit être un nom de modèle, par exemple sonnet.")
+    return LettersConfig(**paths, model=model)
+
+
 def set_search_enabled(path, source_name, search_name, enabled, backup_dir, now):
     """Switch a search of config.yaml on or off, keeping the rest of the file.
 
@@ -207,9 +251,7 @@ def set_enabled(search, enabled):
 def backup_config(path, backup_dir, now):
     """Copy config.yaml into backup_dir, keeping the last backups."""
     try:
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, backup_dir / f"{BACKUP_PREFIX}{now:%Y-%m-%d_%H%M%S}.yaml")
-        remove_old_backups(backup_dir, f"{BACKUP_PREFIX}*.yaml")
+        copy_to_backup(path, backup_dir, BACKUP_PREFIX, now)
     except OSError as err:
         raise ConfigError(
             f"Impossible de sauvegarder {path} dans {backup_dir} : {err}. Rien n'a été modifié."
@@ -218,10 +260,7 @@ def backup_config(path, backup_dir, now):
 
 def write_atomically(path, text):
     """Write a temporary file, then replace path with it."""
-    temporary = path.with_name(path.name + ".tmp")
     try:
-        temporary.write_text(text, encoding="utf-8")
-        os.replace(temporary, path)
+        write_text_atomically(path, text)
     except OSError as err:
-        temporary.unlink(missing_ok=True)
         raise ConfigError(f"Impossible d'écrire {path} : {err}. Il n'a pas changé.") from err

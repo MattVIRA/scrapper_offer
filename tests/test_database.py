@@ -5,7 +5,7 @@ import pytest
 from offers.storage import database
 from offers.storage.database import StorageError, connect
 
-TABLES = {"offers", "tracking", "evaluations", "runs"}
+TABLES = {"offers", "tracking", "evaluations", "runs", "letters"}
 
 
 def tables(conn):
@@ -51,10 +51,10 @@ def test_reopening_keeps_the_data(path):
 
 def test_added_migration_is_applied_once(path):
     connect(path).close()
-    migrations = [*database.MIGRATIONS, "CREATE TABLE letters (id INTEGER PRIMARY KEY);"]
+    migrations = [*database.MIGRATIONS, "CREATE TABLE extra (id INTEGER PRIMARY KEY);"]
 
     conn = connect(path, migrations)
-    assert tables(conn) == TABLES | {"letters"}
+    assert tables(conn) == TABLES | {"extra"}
     assert version(conn) == len(migrations)
     conn.close()
 
@@ -65,12 +65,12 @@ def test_added_migration_is_applied_once(path):
 
 def test_failing_migration_is_rolled_back(path):
     connect(path).close()
-    migrations = [*database.MIGRATIONS, "CREATE TABLE letters (id INTEGER);\nNOT SQL;"]
+    migrations = [*database.MIGRATIONS, "CREATE TABLE extra (id INTEGER);\nNOT SQL;"]
 
     with pytest.raises(StorageError, match="Impossible d'utiliser la base"):
         connect(path, migrations)
     conn = connect(path)
-    assert "letters" not in tables(conn)
+    assert "extra" not in tables(conn)
     assert version(conn) == len(database.MIGRATIONS)
 
 
@@ -120,7 +120,7 @@ def test_version_2_database_keeps_three_statuses(path):
         )
     conn.close()
 
-    conn = connect(path)
+    conn = connect(path, database.MIGRATIONS[:3])
     assert version(conn) == 3
     rows = conn.execute(
         "SELECT status, letter_status, notes, favorite, updated_at FROM tracking ORDER BY offer_id"

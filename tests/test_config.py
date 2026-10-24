@@ -3,11 +3,11 @@
 import os
 import shutil
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
-from offers import config as config_module
-from offers.config import ConfigError, Search, load_config, set_search_enabled
+from offers.config import ConfigError, LettersConfig, Search, load_config, set_search_enabled
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KNOWN = {"business_france", "other"}
@@ -50,6 +50,11 @@ def test_repository_config():
         "sql",
     ]
     assert config.keywords_exclude == []
+    assert config.letters == LettersConfig(
+        profile_dir=Path(ROOT) / "profil",
+        output_dir=Path(ROOT) / "lettres",
+        prompt=Path(ROOT) / "prompts" / "lettre.md",
+    )
 
 
 def test_valid_config(tmp_path):
@@ -95,6 +100,41 @@ def test_enabled_defaults_to_true(tmp_path):
 def test_config_errors(tmp_path, text, message):
     with pytest.raises(ConfigError, match=message):
         load_config(write(tmp_path, text), KNOWN)
+
+
+def test_letters_defaults_when_the_section_is_missing(tmp_path):
+    config = load_config(write(tmp_path, VALID), KNOWN)
+    assert config.letters == LettersConfig(
+        profile_dir=tmp_path / "profil",
+        output_dir=tmp_path / "lettres",
+        prompt=tmp_path / "prompts" / "lettre.md",
+        model=None,
+    )
+
+
+def test_letters_section(tmp_path):
+    text = VALID + "letters:\n  profile_dir: moi\n  output_dir: /tmp/l\n  model: opus\n"
+    letters = load_config(write(tmp_path, text), KNOWN).letters
+    assert letters.profile_dir == tmp_path / "moi"
+    # An absolute path stays as it is.
+    assert letters.output_dir == Path("/tmp/l")
+    assert letters.prompt == tmp_path / "prompts" / "lettre.md"
+    assert letters.model == "opus"
+
+
+@pytest.mark.parametrize(
+    "section, message",
+    [
+        ("letters: [a]\n", "« letters » doit contenir des réglages"),
+        ("letters:\n  profil: moi\n", "réglage inconnu « profil ».*profile_dir"),
+        ("letters:\n  output_dir: ''\n", "letters.output_dir doit être un chemin.*lettres"),
+        ("letters:\n  prompt: 3\n", "letters.prompt doit être un chemin"),
+        ("letters:\n  model: ''\n", "letters.model doit être un nom de modèle"),
+    ],
+)
+def test_letters_errors(tmp_path, section, message):
+    with pytest.raises(ConfigError, match=message):
+        load_config(write(tmp_path, VALID + section), KNOWN)
 
 
 def test_missing_file(tmp_path):
@@ -214,7 +254,7 @@ def test_failed_write_keeps_the_old_file(tmp_path, monkeypatch):
     def failing_replace(source, target):
         raise PermissionError("disque protégé")
 
-    monkeypatch.setattr(config_module.os, "replace", failing_replace)
+    monkeypatch.setattr(os, "replace", failing_replace)
     with pytest.raises(ConfigError, match="Impossible d'écrire.*disque protégé"):
         set_search_enabled(path, "other", "A", False, tmp_path / "backup", NOW)
     assert open(path, encoding="utf-8").read() == WITH_COMMENTS

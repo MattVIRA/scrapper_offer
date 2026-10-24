@@ -14,6 +14,7 @@ PAGES = [
     ("offers.py",    "Offres",    ":material/work:"),
     ("favorites.py", "Favoris",   ":material/star:"),
     ("trash.py",     "Corbeille", ":material/delete:"),
+    ("letters.py",   "Lettres",   ":material/edit_note:"),
     ("collect.py",   "Collecte",  ":material/cloud_download:"),
 ]
 # fmt: on

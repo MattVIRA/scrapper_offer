@@ -28,3 +28,19 @@ keywords_include:
 # Si un de ces mots est trouvé, le score de l'offre passe à 0.
 # L'offre reste quand même dans le fichier.
 keywords_exclude: []
+
+# Lettres de motivation (page Lettres de l'interface).
+# Chemins relatifs au dossier de ce fichier. Aucune donnée personnelle
+# ici : CV et coordonnées vont dans le dossier du profil, hors git.
+letters:
+  # Contient cv/ (un ou plusieurs CV), exemples/ (anciennes lettres),
+  # consignes.md (facultatif : ton, longueur, points à mettre en avant)
+  # et coordonnees.yaml (nom, adresse, téléphone, email, ville).
+  profile_dir: profil
+  # Dossier où les lettres .docx sont écrites.
+  output_dir: lettres
+  # Prompt envoyé à Claude, modifiable depuis la page Lettres.
+  prompt: prompts/lettre.md
+  # Modèle de Claude (par exemple sonnet ou opus). Sans cette ligne :
+  # celui de Claude Code par défaut.
+  # model: sonnet

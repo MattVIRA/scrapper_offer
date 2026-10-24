@@ -24,6 +24,7 @@ from offers.ui.labels import (
     to_database_code,
     to_widget_code,
 )
+from offers.ui.letter_link import finder_button
 from offers.ui.session import open_database
 
 DATE_FORMAT = "%d/%m/%Y"
@@ -252,7 +253,15 @@ def show_summary(stored, duplicates):
     st.text(offer.description or MISSING)
     st.subheader("Profil recherché")
     st.text(offer.candidate_profile or MISSING)
-    # Lot 5: the link to the letter goes here, once it exists.
+    if stored.letter:
+        show_letter(stored)
+
+
+def show_letter(stored):
+    """Date of the letter of the offer, and a button that shows it in the Finder."""
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.markdown(f"Lettre du {stored.letter.created_at:{DATE_FORMAT}}")
+        finder_button(stored.letter.path, key=f"card_letter_{stored.id}")
 
 
 def place(offer):

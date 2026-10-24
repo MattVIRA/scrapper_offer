@@ -1,4 +1,4 @@
-"""Command line: python -m offers collect | export | duplicates | ui."""
+"""Command line: python -m offers collect | export | duplicates | letters | ui."""
 
 import argparse
 import subprocess
@@ -8,10 +8,11 @@ from pathlib import Path
 
 from offers.config import load_config
 from offers.errors import OffersError
+from offers.letters.generate import letters_to_write, run_letters
 from offers.pipeline import export_workbook, run_collect
 from offers.sources import SOURCES, source_label
 from offers.storage.database import backup_database, connect, probable_duplicates
-from offers.summary import collect_summary, excel_summary
+from offers.summary import collect_summary, excel_summary, letter_line, letters_total
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = ROOT / "config.yaml"
@@ -20,6 +21,7 @@ DEFAULT_DB = ROOT / "data" / "offers.db"
 UI_APP = Path(__file__).resolve().parent / "ui" / "app.py"
 # The interface never listens on the local network.
 STREAMLIT_OPTIONS = ["--server.address=localhost", "--browser.gatherUsageStats=false"]
+YES_ANSWERS = {"o", "oui", "y", "yes"}
 
 
 def build_parser():
@@ -48,6 +50,20 @@ def build_parser():
         description="Affiche les offres en ligne de même entreprise et de même titre.",
     )
     add_db_option(duplicates)
+    letters = commands.add_parser(
+        "letters",
+        help="écrit les lettres des offres « À rédiger », avec Claude Code",
+        description="Écrit une lettre .docx pour chaque offre dont la lettre est « À rédiger », "
+        "après confirmation. Chaque lettre utilise le forfait Claude.",
+    )
+    add_db_option(letters)
+    add_config_option(letters)
+    letters.add_argument("--yes", action="store_true", help="ne pas demander de confirmation")
+    letters.add_argument(
+        "--replace",
+        action="store_true",
+        help="remplacer les lettres déjà écrites (l'ancienne est gardée dans lettres/backup/)",
+    )
     ui = commands.add_parser(
         "ui",
         help="ouvre l'interface dans le navigateur",
@@ -115,6 +131,35 @@ def duplicates(args):
             )
 
 
+def letters(args):
+    """Write the letters of the offers « À rédiger », after confirmation."""
+    letters_config = load_config(str(args.config), set(SOURCES)).letters
+    conn = open_existing_database(args.db)
+    targets = letters_to_write(conn, letters_config)
+    if not targets:
+        print("Aucune offre « À rédiger » : rien à faire.")
+        return
+    print(f"{len(targets)} offres « À rédiger » :")
+    for stored, path in targets:
+        present = " (lettre déjà présente)" if path.exists() else ""
+        print(f"  {stored.offer.title} — {stored.offer.company or '?'}{present}")
+    question = "Écrire ces lettres ? Chaque lettre utilise ton forfait Claude. [o/N] "
+    if not args.yes and input(question).strip().lower() not in YES_ANSWERS:
+        print("Annulé : aucune lettre écrite.")
+        return
+    now = datetime.now()
+    backup_database(args.db, now)
+    report = run_letters(
+        conn,
+        letters_config,
+        [stored.id for stored, _ in targets],
+        now,
+        replace=args.replace,
+        on_letter_done=lambda result: print(letter_line(result)),
+    )
+    print(letters_total(report))
+
+
 def open_existing_database(path):
     """Open the database; stop if it does not exist yet."""
     if not path.exists():
@@ -160,6 +205,7 @@ COMMANDS = {
     "collect": collect,
     "export": export,
     "duplicates": duplicates,
+    "letters": letters,
     "ui": ui,
 }
 

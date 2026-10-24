@@ -4,6 +4,7 @@ The « Ouvrir » button of the table cannot be clicked in AppTest: the card
 is opened by setting its session state key, as the button callback does.
 """
 
+import subprocess
 import sys
 from datetime import date, datetime
 
@@ -12,7 +13,13 @@ from streamlit.testing.v1 import AppTest
 
 from offers.__main__ import UI_APP
 from offers.sources.base import FoundOffer
-from offers.storage.database import connect, hide, save_source_result, save_tracking_details
+from offers.storage.database import (
+    connect,
+    hide,
+    record_letter,
+    save_source_result,
+    save_tracking_details,
+)
 from offers.ui import offer_card
 from offers.ui.offer_table import PageSettings
 from tests.factories import make_stored
@@ -333,3 +340,52 @@ def open_trash_card(monkeypatch, db_path, ids):
     at = AppTest.from_file(str(UI_APP), default_timeout=TIMEOUT).run()
     at.session_state["trash_card"] = ids["VIE1"]
     return at.switch_page("app_pages/trash.py").run()
+
+
+# --- Letter (T5.9) ------------------------------------------------------------
+
+
+def add_letter(db_path, offer_id, path):
+    conn = connect(db_path)
+    record_letter(conn, offer_id, path, "v1", datetime(2026, 10, 23, 9, 0))
+    conn.close()
+
+
+def finder_buttons(at):
+    return [b for b in at.button if b.label == "Ouvrir dans le Finder"]
+
+
+def test_card_of_an_offer_with_a_letter(start, db_path, ids, tmp_path, monkeypatch):
+    path = tmp_path / "lettre.docx"
+    path.write_bytes(b"x")
+    add_letter(db_path, ids["VIE1"], path)
+    calls = []
+
+    def fake_run(command, **options):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    at = start(ids["VIE1"])
+
+    assert "Lettre du 23/10/2026" in [m.value for m in at.markdown]
+    (finder,) = finder_buttons(at)
+    finder.click().run()
+    assert not at.exception
+    assert calls == [["open", "-R", str(path)]]
+
+
+def test_card_of_an_offer_without_a_letter(start, ids):
+    at = start(ids["VIE1"])
+    assert finder_buttons(at) == []
+    assert not any(m.value.startswith("Lettre du") for m in at.markdown)
+
+
+def test_card_of_a_letter_moved_away(start, db_path, ids, tmp_path):
+    add_letter(db_path, ids["VIE1"], tmp_path / "absente.docx")
+    at = start(ids["VIE1"])
+
+    finder_buttons(at)[0].click().run()
+
+    assert not at.exception
+    assert any(e.value.startswith("Introuvable") for e in at.error)

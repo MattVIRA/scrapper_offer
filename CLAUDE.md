@@ -11,17 +11,24 @@ dans `sources/base.py`), `storage/` (`database.py`, seul module qui parle
 à SQLite, `schema.sql`, `migrations/`), `scoring/`, `exports/`,
 `tracking.py` (statuts de suivi), `browsing.py` (filtres, compteurs,
 pastilles des listes, sans Streamlit), `pipeline.py` (orchestrateur),
-`summary.py` (textes du bilan de collecte), `backups.py`,
-`__main__.py` (ligne de commande) et `ui/`, l'interface Streamlit :
+`summary.py` (textes des bilans de collecte et de lettres), `backups.py`
+(sauvegardes, écriture atomique), `letters/` (lettres de motivation :
+`inputs.py` lit `profil/`, `prompt.py`, `document.py` écrit le `.docx`,
+`generate.py` enchaîne le tout), `claude_code.py` (appel à `claude -p`,
+réutilisable par le lot 4), `__main__.py` (ligne de commande) et `ui/`,
+l'interface Streamlit :
 - `app.py` : point d'entrée, navigation, erreurs du projet affichées ;
 - `app_pages/` : une page par script (Offres, Favoris, Corbeille,
-  Collecte), qui ne fait qu'appeler les modules ci-dessous ;
+  Lettres, Collecte), qui ne fait qu'appeler les modules ci-dessous ;
 - `offer_table.py` : page commune à Offres, Favoris et Corbeille
   (`PageSettings`) : recherche, filtres sur une ligne, actions ;
   `offer_list.py` (+ `offer_list.js`, `offer_list.css`) : liste façon
   messagerie, composant `st.components.v2`, et barre qui règle sa
   largeur à côté de la fiche ; `offer_card.py` : fiche d'une offre ;
-- `collect_job.py` : collecte dans un fil de fond ; `session.py` :
+- `background_job.py` : travail dans un fil de fond, un à la fois,
+  utilisé par `collect_job.py` (collecte) et `letters_job.py`
+  (lettres) ; `letters_view.py` : sections de la page Lettres ;
+  `letter_link.py` : bouton « Ouvrir dans le Finder » ; `session.py` :
   chemins et ouverture de la base ; `labels.py` : choix de statut et de
   lettre.
 
@@ -32,6 +39,7 @@ pip install -e ".[dev]"         # installer, dans le .venv
 python -m offers collect        # interroge les sites, met à jour la base puis régénère l'Excel
 python -m offers export         # régénère l'Excel à partir de la base, sans réseau
 python -m offers duplicates     # affiche les doublons probables
+python -m offers letters        # écrit les lettres « À rédiger » avec Claude Code, après confirmation
 offers ui                       # ouvre l'interface sur http://localhost:8501 (Ctrl+C pour l'arrêter)
 pytest                          # tests, sans réseau
 ruff check .                    # vérifier le code
@@ -39,7 +47,9 @@ ruff format .                   # mettre en forme (ruff format --check . pour v�
 ```
 
 Options : `--db` (défaut `data/offers.db`) et `--excel` (défaut
-`output/offres_vie.xlsx`) ; `collect` et `ui` prennent aussi `--config`.
+`output/offres_vie.xlsx`) ; `collect`, `letters` et `ui` prennent aussi
+`--config` ; `letters` prend `--yes` (sans confirmation) et `--replace`
+(remplacer les lettres déjà écrites).
 `ui` passe les trois chemins à l'interface, qui peut lancer une collecte
 (page Collecte, dans un fil de fond) et exporter l'Excel.
 
@@ -51,9 +61,21 @@ et `.streamlit/config.toml`). Après une mise à jour du code, relancer
 `offers ui` : Streamlit relit les pages, mais garde en mémoire les
 modules déjà importés.
 
-`collect`, `export` et `ui` modifient la base, l'Excel ou `config.yaml`
-de l'utilisateur (et `collect` appelle les vrais sites) : ne pas les
-lancer sans accord sur ses fichiers. Les tests suffisent pour vérifier.
+`collect`, `export`, `letters` et `ui` modifient la base, l'Excel,
+`config.yaml`, le prompt ou les lettres de l'utilisateur (`collect`
+appelle les vrais sites, `letters` le vrai `claude` et lit `profil/`) :
+ne pas les lancer sans accord sur ses fichiers. Les tests suffisent pour
+vérifier ; ils n'appellent jamais `claude` (lanceur ou `ask` remplacés)
+et créent leur profil inventé dans `tmp_path` (`tests/letter_files.py`).
+
+**Lettres.** `config.yaml`, section `letters:` (chemins seulement,
+relatifs à `config.yaml`) : `profile_dir` (`profil/` : `cv/`,
+`exemples/`, `consignes.md`, `coordonnees.yaml`), `output_dir`
+(`lettres/`), `prompt` (`prompts/lettre.md`, versionné, modifiable
+depuis la page Lettres ; sa version est l'empreinte du texte, gardée
+avec chaque lettre), `model` facultatif. Claude n'a aucun outil : il
+reçoit tout dans le prompt (sans les coordonnées) et renvoie la lettre
+en JSON, vérifiée ; le programme écrit le `.docx` et la base.
 
 **Tester l'interface.** `AppTest` (`streamlit.testing.v1`), sans
 navigateur, sur une base dans `tmp_path`, jamais la vraie (ne pas lancer
@@ -124,7 +146,13 @@ pytest seul.
   suivant (sauf dans `output/backup/`).
 - La table `tracking` (statut, lettre, favori, lecture, corbeille, date
   de candidature, notes) n'est écrite que par l'interface, à partir des
-  saisies de l'utilisateur ; la collecte n'y touche jamais.
+  saisies de l'utilisateur ; la collecte n'y touche jamais. Seule
+  exception : la génération des lettres, lancée par l'utilisateur, passe
+  le champ « Lettre » à « Rédigée » (`record_letter`, même transaction
+  que la table `letters`).
+- Une lettre existante n'est jamais écrasée sans demande explicite
+  (« Remplacer les lettres existantes », `--replace`) ; l'ancienne est
+  alors copiée dans `lettres/backup/`. Une offre a une lettre au plus.
 - Une offre n'est jamais supprimée : la corbeille la masque
   (`tracking.hidden`), et l'on peut la restaurer.
 - L'interface n'écoute que sur `localhost`, jamais sur le réseau local.

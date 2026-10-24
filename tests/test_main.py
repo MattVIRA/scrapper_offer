@@ -1,11 +1,18 @@
 """Tests of the command line (python -m offers)."""
 
+from datetime import datetime
+from functools import partial
+
 import pytest
 
 from offers import __main__ as cli
 from offers import sources as registry
 from offers.errors import OffersError
+from offers.letters import generate
+from offers.storage.database import connect, set_letter_status
 from tests.factories import FakeSource, make_offer
+from tests.letter_files import make_profile
+from tests.test_storage_offers import offer, save
 
 CONFIG = """
 sources:
@@ -206,3 +213,91 @@ def test_export_without_database(capsys, tmp_path):
     assert cli.main(["export", "--db", str(db), "--excel", str(tmp_path / "x.xlsx")]) == 1
     assert "Erreur : Base introuvable" in capsys.readouterr().out
     assert not db.exists()
+
+
+# --- letters ------------------------------------------------------------------
+
+
+@pytest.fixture
+def letters_setup(tmp_path, paths, monkeypatch):
+    """Profile, prompt and a database with two offers « À rédiger »."""
+    monkeypatch.setitem(registry.SOURCES, "fake", WorkingSource)
+    make_profile(tmp_path)
+    (tmp_path / "prompts").mkdir()
+    (tmp_path / "prompts" / "lettre.md").write_text("Écris une lettre.", encoding="utf-8")
+    conn = connect(tmp_path / "data" / "offers.db")
+    save(conn, [offer(1, company="ACME"), offer(2, company="Foo")])
+    set_letter_status(conn, [1, 2], "to_write", datetime(2026, 10, 23, 9, 0))
+    conn.close()
+    return paths
+
+
+def fake_claude(prompt, schema, model=None):
+    return {"subject": "S", "salutation": "Madame,", "paragraphs": ["P"], "closing": "C"}
+
+
+@pytest.fixture
+def with_fake_claude(monkeypatch):
+    monkeypatch.setattr(cli, "run_letters", partial(generate.run_letters, ask=fake_claude))
+
+
+def letters_in_db(tmp_path):
+    conn = connect(tmp_path / "data" / "offers.db")
+    return conn.execute("SELECT COUNT(*) FROM letters").fetchone()[0]
+
+
+def test_letters_refused_confirmation_writes_nothing(
+    monkeypatch, capsys, letters_setup, tmp_path, with_fake_claude
+):
+    monkeypatch.setattr("builtins.input", lambda question: "n")
+
+    assert cli.main(["letters", *letters_setup[:2], *letters_setup[4:]]) == 0
+
+    output = capsys.readouterr().out
+    assert "2 offres « À rédiger » :\n  Data 1 — ACME\n  Data 2 — Foo\n" in output
+    assert output.endswith("Annulé : aucune lettre écrite.\n")
+    assert not (tmp_path / "lettres").exists()
+    assert letters_in_db(tmp_path) == 0
+    assert not (tmp_path / "data" / "backup").exists()
+
+
+def test_letters_confirmed(monkeypatch, capsys, letters_setup, tmp_path, with_fake_claude):
+    questions = []
+    monkeypatch.setattr("builtins.input", lambda question: questions.append(question) or "o")
+
+    assert cli.main(["letters", *letters_setup[:2], *letters_setup[4:]]) == 0
+
+    assert "forfait Claude" in questions[0]
+    output = capsys.readouterr().out.splitlines()
+    assert output[-3:] == [
+        "Data 1 (ACME) : lettre écrite (fake_1_ACME.docx).",
+        "Data 2 (Foo) : lettre écrite (fake_2_Foo.docx).",
+        "2 lettres écrites, 0 en erreur, 0 déjà présentes.",
+    ]
+    assert letters_in_db(tmp_path) == 2
+    assert len(list((tmp_path / "data" / "backup").iterdir())) == 1
+
+    # Nothing left to do on a second run.
+    assert cli.main(["letters", "--yes", *letters_setup[:2], *letters_setup[4:]]) == 0
+    assert capsys.readouterr().out == "Aucune offre « À rédiger » : rien à faire.\n"
+
+
+def test_letters_yes_and_replace(capsys, letters_setup, tmp_path, with_fake_claude):
+    (tmp_path / "lettres").mkdir()
+    (tmp_path / "lettres" / "fake_1_ACME.docx").write_bytes(b"ancienne")
+    options = [*letters_setup[:2], *letters_setup[4:]]
+
+    assert cli.main(["letters", "--yes", *options]) == 0
+    output = capsys.readouterr().out
+    assert "Data 1 — ACME (lettre déjà présente)" in output
+    assert "1 lettres écrites, 0 en erreur, 1 déjà présentes." in output
+
+    assert cli.main(["letters", "--yes", "--replace", *options]) == 0
+    assert "1 lettres écrites" in capsys.readouterr().out
+    assert letters_in_db(tmp_path) == 2
+
+
+def test_letters_missing_input(capsys, letters_setup, tmp_path, with_fake_claude):
+    (tmp_path / "profil" / "coordonnees.yaml").unlink()
+    assert cli.main(["letters", "--yes", *letters_setup[:2], *letters_setup[4:]]) == 1
+    assert "Erreur : Coordonnées introuvables" in capsys.readouterr().out

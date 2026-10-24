@@ -43,3 +43,30 @@ def excel_skipped_summary(error):
 
 def duplicates_summary(count):
     return f"{count} doublons probables : python -m offers duplicates pour les voir."
+
+
+def letter_line(result):
+    """Return the summary line of the letter of one offer (a LetterResult)."""
+    offer = result.stored.offer
+    name = f"{offer.title} ({offer.company or 'entreprise non précisée'})"
+    if result.error:
+        return f"{name} : en erreur, pas de lettre. {result.error}"
+    if result.skipped:
+        return f"{name} : lettre déjà présente ({result.path.name}), non remplacée."
+    return f"{name} : lettre écrite ({result.path.name})."
+
+
+def letters_total(report):
+    """Return the last line of the summary of a LettersReport."""
+    line = (
+        f"{len(report.written)} lettres écrites, {len(report.failed)} en erreur, "
+        f"{len(report.skipped)} déjà présentes."
+    )
+    if report.failed:
+        line += " Les offres en erreur restent « À rédiger » : relance pour les refaire."
+    return line
+
+
+def letters_summary(report):
+    """Return the lines of the summary of a LettersReport: one per offer, then the total."""
+    return [*(letter_line(result) for result in report.results), letters_total(report)]

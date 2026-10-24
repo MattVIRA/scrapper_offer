@@ -24,6 +24,7 @@ MIGRATIONS = [
     STORAGE_FILES.joinpath("schema.sql").read_text(encoding="utf-8"),
     STORAGE_FILES.joinpath("migrations", "002_tracking_ui.sql").read_text(encoding="utf-8"),
     STORAGE_FILES.joinpath("migrations", "003_fewer_statuses.sql").read_text(encoding="utf-8"),
+    STORAGE_FILES.joinpath("migrations", "004_letters.sql").read_text(encoding="utf-8"),
 ]
 
 
@@ -57,6 +58,16 @@ class SaveReport:
 
 
 @dataclass(frozen=True)
+class StoredLetter:
+    """The cover letter written for an offer."""
+
+    offer_id: int
+    path: Path
+    prompt_version: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
 class StoredOffer:
     """An offer as stored, with its follow-up and its keyword score."""
 
@@ -77,6 +88,8 @@ class StoredOffer:
     read_at: datetime | None
     # In the trash.
     hidden: bool
+    # None: no letter was written for the offer.
+    letter: StoredLetter | None = None
 
 
 @dataclass(frozen=True)
@@ -330,20 +343,25 @@ def update_tracking(conn, offer_ids, fields, now, only_if=None):
     Create the missing tracking rows; all offers are written, or none.
     only_if: SQL condition; rows that do not meet it are left unchanged.
     """
+    with transaction(conn, "Impossible d'enregistrer le suivi, rien n'a été modifié"):
+        write_tracking(conn, offer_ids, fields, now, only_if)
+
+
+def write_tracking(conn, offer_ids, fields, now, only_if=None):
+    """Write fields in the tracking of the offers, inside the caller's transaction."""
     values = {**fields, "updated_at": to_text(now)}
     assignments = ", ".join(f"{column} = ?" for column in values)
     condition = f" AND {only_if}" if only_if else ""
-    with transaction(conn, "Impossible d'enregistrer le suivi, rien n'a été modifié"):
-        for offer_id in offer_ids:
-            conn.execute(
-                "INSERT INTO tracking (offer_id, updated_at) VALUES (?, ?) "
-                "ON CONFLICT (offer_id) DO NOTHING",
-                (offer_id, to_text(now)),
-            )
-            conn.execute(
-                f"UPDATE tracking SET {assignments} WHERE offer_id = ?{condition}",
-                [*values.values(), offer_id],
-            )
+    for offer_id in offer_ids:
+        conn.execute(
+            "INSERT INTO tracking (offer_id, updated_at) VALUES (?, ?) "
+            "ON CONFLICT (offer_id) DO NOTHING",
+            (offer_id, to_text(now)),
+        )
+        conn.execute(
+            f"UPDATE tracking SET {assignments} WHERE offer_id = ?{condition}",
+            [*values.values(), offer_id],
+        )
 
 
 def count_offers(conn):
@@ -364,15 +382,40 @@ def load_offer(row):
 
 def list_offers(conn):
     """Return all offers as StoredOffer, by first_seen then id."""
+    return select_offers(conn, order="o.first_seen, o.id")
+
+
+def offers_to_write(conn):
+    """Return the offers whose letter is to write, out of the trash, by first_seen then id.
+
+    Their letter, if they already have one, is in StoredOffer.letter.
+    """
+    return select_offers(
+        conn,
+        where="t.letter_status = 'to_write' AND t.hidden = 0",
+        order="o.first_seen, o.id",
+    )
+
+
+def list_letters(conn):
+    """Return the offers that have a letter, the most recent letter first."""
+    return select_offers(conn, where="l.id IS NOT NULL", order="l.created_at DESC, l.id DESC")
+
+
+def select_offers(conn, order, where="1"):
+    """Return the offers matching a SQL condition as StoredOffer, in the given order."""
     try:
         rows = conn.execute(
             "SELECT o.*, t.status, t.applied_on, t.notes, t.letter_status, t.favorite, "
             "t.read_at, t.hidden, "
-            "e.score, e.justification AS words "
+            "e.score, e.justification AS words, "
+            "l.path AS letter_path, l.prompt_version AS letter_prompt_version, "
+            "l.created_at AS letter_created_at "
             "FROM offers o "
             "LEFT JOIN tracking t ON t.offer_id = o.id "
             "LEFT JOIN evaluations e ON e.offer_id = o.id AND e.method = ? "
-            "ORDER BY o.first_seen, o.id",
+            "LEFT JOIN letters l ON l.offer_id = o.id "
+            f"WHERE {where} ORDER BY {order}",
             (KEYWORDS_METHOD,),
         ).fetchall()
     except sqlite3.Error as err:
@@ -399,7 +442,47 @@ def stored_offer(row):
         favorite=bool(row["favorite"]),
         read_at=datetime.fromisoformat(row["read_at"]) if row["read_at"] else None,
         hidden=bool(row["hidden"]),
+        letter=stored_letter(row["id"], row) if row["letter_path"] else None,
     )
+
+
+def stored_letter(offer_id, row):
+    """Return the StoredLetter of a row with letter_path, letter_prompt_version, ..."""
+    return StoredLetter(
+        offer_id=offer_id,
+        path=Path(row["letter_path"]),
+        prompt_version=row["letter_prompt_version"],
+        created_at=datetime.fromisoformat(row["letter_created_at"]),
+    )
+
+
+def record_letter(conn, offer_id, path, prompt_version, now):
+    """Record the letter of an offer, replacing its previous one, and mark it written.
+
+    Both are written in one transaction, or nothing is.
+    """
+    with transaction(conn, "Impossible d'enregistrer la lettre dans la base, rien n'a été modifié"):
+        conn.execute(
+            "INSERT INTO letters (offer_id, path, prompt_version, created_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT (offer_id) DO UPDATE SET path = excluded.path, "
+            "prompt_version = excluded.prompt_version, created_at = excluded.created_at",
+            (offer_id, str(path), prompt_version, to_text(now)),
+        )
+        write_tracking(conn, [offer_id], {"letter_status": "written"}, now)
+
+
+def load_letter(conn, offer_id):
+    """Return the StoredLetter of an offer, or None."""
+    try:
+        row = conn.execute(
+            "SELECT path AS letter_path, prompt_version AS letter_prompt_version, "
+            "created_at AS letter_created_at FROM letters WHERE offer_id = ?",
+            (offer_id,),
+        ).fetchone()
+    except sqlite3.Error as err:
+        raise StorageError(f"Impossible de lire la lettre de l'offre {offer_id} : {err}") from err
+    return stored_letter(offer_id, row) if row else None
 
 
 def to_text(value):

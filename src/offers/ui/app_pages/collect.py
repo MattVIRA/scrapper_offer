@@ -130,10 +130,8 @@ def runs_frame(runs):
 
 st.title("Collecte")
 runner = get_runner()
+runner.raise_failure()
 job = runner.job
-if job is not None and job.failure is not None:
-    failure, job.failure = job.failure, None
-    raise failure
 running = job is not None and job.running
 config = load_config(str(st.session_state.config_path), set(SOURCES))
 
