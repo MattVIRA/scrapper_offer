@@ -30,6 +30,20 @@ MARKER_CLASSES = {
     browsing.NO_MARKER:          "",
 }
 # fmt: on
+# Sort buttons of the header, in the order of the line's parts.
+# fmt: off
+SORT_LABELS = {
+    browsing.SORT_FAVORITE: "Favori",
+    browsing.SORT_STATUS:   "Statut",
+    browsing.SORT_TITLE:    "Titre",
+    browsing.SORT_COMPANY:  "Entreprise",
+    browsing.SORT_PLACE:    "Lieu",
+    browsing.SORT_LETTER:   "Lettre",
+    browsing.SORT_SOURCE:   "Source",
+    browsing.SORT_SCORE:    "Score",
+    browsing.SORT_DATE:     "Date",
+}
+# fmt: on
 # Width of the list beside an open card, until the user drags the bar.
 DEFAULT_LIST_WIDTH = "50%"
 # The bar between the list and the card: the page itself has no theme variables.
@@ -60,13 +74,16 @@ class ListEvents:
     checked: Callable
     opened: Callable
     starred: Callable
+    # Gets the column clicked in the header.
+    sorted: Callable
 
 
-def show_list(key, rows, checked, open_id, keys, events, stars=True):
+def show_list(key, rows, checked, open_id, keys, events, sort, stars=True):
     """Show the lines of the offers.
 
-    key: widget key of the list; rows: list_rows of the offers shown;
-    checked: ids of the checked offers; open_id: offer whose card is open.
+    key: widget key of the list; rows: list_rows of the offers shown, in
+    their sorted order; checked: ids of the checked offers; open_id: offer
+    whose card is open; sort: browsing.Sort of the rows.
     stars: show the stars that switch the favorites (not in the trash).
     """
     _COMPONENT(
@@ -78,12 +95,27 @@ def show_list(key, rows, checked, open_id, keys, events, stars=True):
             "listPaneKey": keys.list_pane,
             "cardOpen": open_id is not None,
             "stars": stars,
+            "sortColumns": sort_columns(stars),
+            "sort": {"column": sort.column, "descending": sort.descending},
         },
         key=key,
         on_checked_change=lambda: events.checked(set(event_value(key, "checked") or ())),
         on_opened_change=lambda: events.opened(event_value(key, "opened")),
         on_starred_change=lambda: events.starred(event_value(key, "starred")),
+        on_sorted_change=lambda: events.sorted(event_value(key, "sorted")),
     )
+
+
+def sort_columns(stars=True):
+    """Return the sort buttons of the header: [column, label] pairs.
+
+    No favorites column without stars, as in the trash.
+    """
+    return [
+        [column, label]
+        for column, label in SORT_LABELS.items()
+        if stars or column != browsing.SORT_FAVORITE
+    ]
 
 
 def event_value(key, name):

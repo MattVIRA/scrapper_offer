@@ -85,7 +85,7 @@ l'app sans `--db`). `AppTest` n'exécute pas le JavaScript de la liste :
 les tests lisent les lignes qu'elle reçoit (`at.get("bidi_component")`),
 les offres cochées sont dans `st.session_state["<page>_selected"]`, la
 fiche ouverte dans `"<page>_card"` (les tests les remplissent). Cocher,
-ouvrir, l'étoile et la barre de largeur sont à faire vérifier par
+ouvrir, l'étoile, les boutons de tri et la barre de largeur sont à faire vérifier par
 l'utilisateur. Un bouton qui modifie l'état
 d'un widget déjà affiché (décocher le tableau) passe par un rappel
 (`on_click`), exécuté avant l'affichage.

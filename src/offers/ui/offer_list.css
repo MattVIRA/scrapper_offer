@@ -24,6 +24,36 @@
   font-size: 0.85em;
 }
 
+/* Sort buttons, at the right of the header; they wrap beside a narrow list. */
+.sort {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.15rem 0.35rem;
+  margin-left: auto;
+}
+
+.sort-button {
+  border: none;
+  background: none;
+  padding: 0 0.3rem;
+  border-radius: 0.6rem;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.sort-button:hover {
+  background: var(--st-gray-background-color);
+}
+
+.sort-button.on {
+  background: var(--st-gray-background-color);
+  color: var(--st-text-color);
+  font-weight: 600;
+}
+
 .row {
   display: flex;
   align-items: center;

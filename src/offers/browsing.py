@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from offers.scoring.keywords import normalize
-from offers.tracking import STATUSES
+from offers.sources import source_label
+from offers.tracking import STATUSES, letter_label, status_label
 
 # "online" filter values.
 ONLINE = "online"
@@ -34,6 +35,20 @@ STATUS_MARKERS = {
     "not_for_me": MARKER_NOT_FOR_ME,
     "interesting": MARKER_INTERESTING,
 }
+
+# Columns the lists can be sorted by, one at a time.
+SORT_FAVORITE = "favorite"
+SORT_STATUS = "status"
+SORT_TITLE = "title"
+SORT_COMPANY = "company"
+SORT_PLACE = "place"
+SORT_LETTER = "letter"
+SORT_SOURCE = "source"
+SORT_SCORE = "score"
+SORT_DATE = "date"
+# Columns sorted in descending order on the first click: best score and
+# favorites first. Text columns start in alphabetical order.
+DESCENDING_FIRST = frozenset({SORT_FAVORITE, SORT_SCORE})
 
 
 @dataclass(frozen=True)
@@ -71,6 +86,18 @@ class Counters:
     # Status code (None: no status) -> number of offers.
     by_status: dict[str | None, int] = field(default_factory=dict)
     letters_to_write: int = 0
+
+
+@dataclass(frozen=True)
+class Sort:
+    """Column the list is sorted by, and in which direction."""
+
+    column: str = SORT_DATE
+    descending: bool = False
+
+
+# Same order as the database: the default sort changes nothing.
+DEFAULT_SORT = Sort()
 
 
 @dataclass(frozen=True)
@@ -176,6 +203,55 @@ def marker(stored, on_favorites_page=False):
     if not stored.online:
         return MARKER_OFFLINE
     return NO_MARKER
+
+
+def sort_offers(offers, sort):
+    """Return the StoredOffer sorted by one column.
+
+    Text is compared without case or accents. Offers without a value come
+    last, in either direction; equal values keep their order.
+    """
+    key = SORT_KEYS[sort.column]
+    present = [stored for stored in offers if key(stored) is not None]
+    missing = [stored for stored in offers if key(stored) is None]
+    return sorted(present, key=key, reverse=sort.descending) + missing
+
+
+def next_sort(current, column):
+    """Return the sort after a click on a column: the other direction for
+    the current column, else the column in its first direction."""
+    if column == current.column:
+        return Sort(column, not current.descending)
+    return Sort(column, column in DESCENDING_FIRST)
+
+
+def text_key(text):
+    """Sort key of a text: None when empty."""
+    return normalize(text) if text else None
+
+
+def place_key(stored):
+    """Sort key of the place: the country, then the city."""
+    offer = stored.offer
+    if not (offer.country or offer.city):
+        return None
+    return (normalize(offer.country or ""), normalize(offer.city or ""))
+
+
+# Column -> sort key of a StoredOffer; None means no value.
+# fmt: off
+SORT_KEYS = {
+    SORT_FAVORITE: lambda s: s.favorite,
+    SORT_STATUS:   lambda s: text_key(s.status and status_label(s.status)),
+    SORT_TITLE:    lambda s: text_key(s.offer.title),
+    SORT_COMPANY:  lambda s: text_key(s.offer.company),
+    SORT_PLACE:    place_key,
+    SORT_LETTER:   lambda s: text_key(s.letter_status and letter_label(s.letter_status)),
+    SORT_SOURCE:   lambda s: text_key(source_label(s.offer.source)),
+    SORT_SCORE:    lambda s: s.score,
+    SORT_DATE:     lambda s: s.first_seen,
+}
+# fmt: on
 
 
 def duplicate_tags(groups):

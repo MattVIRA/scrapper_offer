@@ -100,7 +100,9 @@ def show_offer_page(settings):
         tags = browsing.duplicate_tags(probable_duplicates(conn))
     text = search_bar(settings)
     offer_filter, counters_slot = filter_bar(offers, settings, text)
-    shown = browsing.filter_offers(offers, offer_filter)
+    shown = browsing.sort_offers(
+        browsing.filter_offers(offers, offer_filter), current_sort(settings)
+    )
     counters_slot.caption(counters_text(browsing.counters(shown)))
     show_undo(settings)
     card = opened_offer(settings, offers)
@@ -333,9 +335,24 @@ def show_offers(settings, shown, open_id):
             checked=state_setter(settings.state_key("selected")),
             opened=lambda offer_id: offer_card.open_card(settings, offer_id),
             starred=lambda offer_id: offer_card.switch_favorite(offer_id, not favorites[offer_id]),
+            sorted=lambda column: sort_by(settings, column),
         ),
+        current_sort(settings),
         stars=not settings.in_trash,
     )
+
+
+def current_sort(settings):
+    """Return the browsing.Sort of the page; kept until the app is closed."""
+    return st.session_state.get(settings.state_key("sort"), browsing.DEFAULT_SORT)
+
+
+def sort_by(settings, column):
+    """Sort the list by the column clicked; a second click reverses it."""
+    if column in browsing.SORT_KEYS:
+        st.session_state[settings.state_key("sort")] = browsing.next_sort(
+            current_sort(settings), column
+        )
 
 
 def state_setter(state_key) -> Callable:

@@ -20,7 +20,7 @@ def stored(id, **changes):
     offer_fields.update(
         {
             key: changes.pop(key)
-            for key in ("source", "country", "title", "company")
+            for key in ("source", "country", "city", "title", "company")
             if key in changes
         }
     )
@@ -256,3 +256,81 @@ def test_filter_choices(offers):
     choices = browsing.filter_choices(offers)
     assert choices.sources == ["business_france", "other", "test"]
     assert choices.countries == ["ALLEMAGNE", "ESPAGNE", "FRANCE"]
+
+
+# --- Sort ---------------------------------------------------------------------
+
+
+def ids_sorted(offers, column, descending=False):
+    return [s.id for s in browsing.sort_offers(offers, browsing.Sort(column, descending))]
+
+
+def test_sort_text_alphabetically_without_case_or_accents():
+    offers = [
+        stored(1, company="zeta"),
+        stored(2, company="Été"),
+        stored(3, company="Alpha"),
+        stored(4, company=""),
+    ]
+    assert ids_sorted(offers, browsing.SORT_COMPANY) == [3, 2, 1, 4]
+    # Offers without a value stay last in both directions.
+    assert ids_sorted(offers, browsing.SORT_COMPANY, descending=True) == [1, 2, 3, 4]
+
+
+def test_sort_status_and_letter_by_label():
+    offers = [
+        stored(1, status="rejected", letter_status="written"),
+        stored(2),
+        stored(3, status="interesting", letter_status="to_write"),
+        stored(4, status="applied"),
+    ]
+    # Intéressant, Postulé, Refusé, then no status.
+    assert ids_sorted(offers, browsing.SORT_STATUS) == [3, 4, 1, 2]
+    # À rédiger, Rédigée, then no letter.
+    assert ids_sorted(offers, browsing.SORT_LETTER) == [3, 1, 2, 4]
+
+
+def test_sort_place_by_country_then_city():
+    offers = [
+        stored(1, country="FRANCE", city="PARIS"),
+        stored(2, country="ALLEMAGNE", city="BERLIN"),
+        stored(3, country="FRANCE", city="LYON"),
+    ]
+    assert ids_sorted(offers, browsing.SORT_PLACE) == [2, 3, 1]
+
+
+def test_sort_numbers_and_dates():
+    offers = [
+        stored(1, score=2, first_seen=datetime(2026, 10, 3)),
+        stored(2, score=None, first_seen=datetime(2026, 10, 1)),
+        stored(3, score=5, first_seen=datetime(2026, 10, 2)),
+    ]
+    assert ids_sorted(offers, browsing.SORT_SCORE, descending=True) == [3, 1, 2]
+    assert ids_sorted(offers, browsing.SORT_DATE) == [2, 3, 1]
+
+
+def test_sort_keeps_the_order_of_equal_values():
+    offers = [stored(3), stored(1, favorite=True), stored(2)]
+    assert ids_sorted(offers, browsing.SORT_FAVORITE, descending=True) == [1, 3, 2]
+    assert ids_sorted(offers, browsing.SORT_TITLE) == [3, 1, 2]
+
+
+def test_every_sort_column_has_a_key():
+    offers = [stored(1, source="business_france"), stored(2)]
+    for column in browsing.SORT_KEYS:
+        assert len(browsing.sort_offers(offers, browsing.Sort(column))) == 2
+
+
+@pytest.mark.parametrize(
+    ("column", "expected"),
+    [
+        # Text starts in alphabetical order, score and favorites at the top.
+        (browsing.SORT_TITLE, browsing.Sort(browsing.SORT_TITLE, False)),
+        (browsing.SORT_SCORE, browsing.Sort(browsing.SORT_SCORE, True)),
+        (browsing.SORT_FAVORITE, browsing.Sort(browsing.SORT_FAVORITE, True)),
+        # A second click on the current column reverses it.
+        (browsing.SORT_DATE, browsing.Sort(browsing.SORT_DATE, True)),
+    ],
+)
+def test_next_sort_is_one_column_at_a_time(column, expected):
+    assert browsing.next_sort(browsing.DEFAULT_SORT, column) == expected

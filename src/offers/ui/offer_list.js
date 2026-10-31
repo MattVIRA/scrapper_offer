@@ -1,7 +1,8 @@
 // List of offers, one line each, and the bar that resizes it beside the card.
 //
-// data: {rows, checked, open, splitKey, listPaneKey, cardOpen, stars}
-// Events sent to Python: checked (ids), opened (id), starred (id).
+// data: {rows, checked, open, splitKey, listPaneKey, cardOpen, stars,
+//        sortColumns ([column, label]), sort ({column, descending})}
+// Events sent to Python: checked (ids), opened (id), starred (id), sorted (column).
 // Texts come from the websites: always set with textContent, never as HTML.
 
 const WIDTH_VAR = "--offer-list-width";
@@ -40,9 +41,27 @@ function render(list, data, setTriggerValue) {
   const checked = new Set(data.checked);
   const send = () => setTriggerValue("checked", [...checked]);
   list.replaceChildren(header(data.rows, checked, send));
+  list.firstChild.append(sortButtons(data, setTriggerValue));
   for (const row of data.rows) {
     list.append(line(row, data, checked, send, setTriggerValue));
   }
+}
+
+// One button per column; the list is sorted by one column at a time.
+function sortButtons(data, setTriggerValue) {
+  const element = document.createElement("div");
+  element.className = "sort";
+  element.append(text("sort-label", "Trier par"));
+  for (const [column, label] of data.sortColumns) {
+    const button = document.createElement("button");
+    const active = column === data.sort.column;
+    button.className = active ? "sort-button on" : "sort-button";
+    button.textContent = active ? `${label} ${data.sort.descending ? "▼" : "▲"}` : label;
+    button.title = active ? "Inverser l'ordre" : `Trier par ${label.toLowerCase()}`;
+    button.addEventListener("click", () => setTriggerValue("sorted", column));
+    element.append(button);
+  }
+  return element;
 }
 
 function header(rows, checked, send) {

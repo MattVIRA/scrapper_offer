@@ -314,6 +314,37 @@ def test_list_shows_the_checked_and_open_offers(at, ids):
     assert data["cardOpen"] and data["stars"]
 
 
+def test_list_is_sorted_by_date_by_default(at):
+    data = list_data(at)
+    assert titles(at) == ["Data analyst", "Poste 2", "Poste 3"]
+    assert data["sort"] == {"column": "date", "descending": False}
+    assert [column for column, _ in data["sortColumns"]] == list(offer_list.SORT_LABELS)
+
+
+def test_sorted_list(at, ids):
+    # As the component's callback leaves it after two clicks on « Titre ».
+    at.session_state["offers_sort"] = browsing.Sort(browsing.SORT_TITLE, descending=True)
+    at.run()
+    assert titles(at) == ["Poste 3", "Poste 2", "Data analyst"]
+    assert list_data(at)["sort"] == {"column": "title", "descending": True}
+
+
+def test_sort_by_reverses_the_current_column(monkeypatch):
+    state = {}
+    monkeypatch.setattr(offer_table.st, "session_state", state)
+    offer_table.sort_by(PAGE, browsing.SORT_SCORE)
+    assert state["offers_sort"] == browsing.Sort(browsing.SORT_SCORE, descending=True)
+    offer_table.sort_by(PAGE, browsing.SORT_SCORE)
+    assert state["offers_sort"] == browsing.Sort(browsing.SORT_SCORE, descending=False)
+    offer_table.sort_by(PAGE, "unknown")
+    assert state["offers_sort"].column == browsing.SORT_SCORE
+
+
+def test_no_favorites_sort_in_the_trash():
+    columns = [column for column, _ in offer_list.sort_columns(stars=False)]
+    assert browsing.SORT_FAVORITE not in columns
+
+
 def test_list_without_card(at):
     data = list_data(at)
     assert data["open"] is None and not data["cardOpen"]
